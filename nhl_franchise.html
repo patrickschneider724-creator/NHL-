@@ -89,9 +89,38 @@ text-shadow:0 0 40px #ff0,0 0 80px #f90;text-align:center;line-height:1.2;}
 // ===================== CONSTANTS =====================
 const RINK={W:85,H:200,GL_TOP:11,GL_BOT:189,GOAL_W:6,GOAL_D:4,BL_TOP:75,BL_BOT:125,CTR:100,CR_R:7,CR_D:5};
 const CFG={CAP:88000000,PERIOD_SECS:1200,GAME_SPEED:6.5,PERIODS:3,SEASON_GAMES:82,DRAFT_ROUNDS:7,
-P_R:2.5,PUCK_R:0.5,MAX_SPD:3.5,FRICTION:0.92,PUCK_FRIC:0.988,
-WRIST_SPD:14,SLAP_SPD:20,PASS_SPD:9,AI_SPD:1.5,GOALIE_SPD:1.6,
+P_R:2.5,PUCK_R:0.5,PUCK_FRIC:0.988,
+WRIST_SPD:14,SLAP_SPD:20,PASS_SPD:9,GOALIE_SPD:1.6,
 PICKUP_R:5.0,CHECK_R:5,POKE_R:5,SLAP_THRESHOLD:0.25,INPUT_BUFFER:0.12};
+
+// ===================== MOVEMENT PHYSICS =====================
+// All speeds in game-units/frame at 60fps. 1 unit ≈ 1 foot.
+// End-to-end at sprint (200ft / 0.68 / 60fps) ≈ 4.9 seconds — realistic NHL pace.
+const MOVE={
+  SPRINT:      0.68,   // ~28 mph — breakaway, loose puck race, hard backcheck
+  HARD:        0.52,   // ~21 mph — pressure, active defense, urgent support
+  NORMAL:      0.40,   // ~16 mph — controlled possession, zone support
+  GLIDE:       0.24,   // ~10 mph — repositioning, arrival settling
+
+  ACCEL_SPRINT:  0.090, // ramp to sprint: ~90% speed in ~25 frames (0.42s)
+  ACCEL_NORMAL:  0.115, // ramp to normal/hard: ~90% in ~20 frames (0.33s)
+  ACCEL_PLAYER:  0.130, // player-controlled: slightly snappier feel
+  GLIDE_FRIC:    0.935, // velocity × this each frame when coasting — natural glide
+  STUN_FRIC:     0.88,  // heavy friction on stunned players
+
+  TURN_RATE:     0.22,  // radians/frame max heading change (~12.6°/frame)
+                        // 180° reversal takes ~14 frames (0.23s)
+  TURN_COST:     0.35,  // fraction of speed lost on sharpest turn (>135°)
+
+  PUCK_MULT:     0.87,  // puck carrier is slower
+  SPD_RATING:    0.30,  // how much speed rating scales max speed (0=ignore, 1=full)
+
+  ARRIVAL_R:     12,    // ft — start slowing when this close to target
+  ARRIVAL_MIN:   0.40,  // minimum speed fraction at arrival point
+
+  // AI intensity speed caps (multiplied against base speeds above)
+  AI_SPD_MULT:   0.92,  // AI never quite reaches player-level max speed
+};
 
 // ===================== AI CONFIG =====================
 const AI_CFG={
@@ -1723,28 +1752,49 @@ function drawAIDebug(ctx,L){
     chase_puck:'#ffffff',support_puck:'#cccccc',transition_shape:'#666688',
     backcheck:'#ff8800',
   };
+  const INTENS_COLOR={sprint:'#ff4444',hard:'#ffaa00',normal:'#44ff88',glide:'#4488ff'};
+
   G.players.forEach(p=>{
     if(p.isGoalie)return;
     const px=gx(p.x),py=gy(p.y);
     const col=ROLE_COLOR[p.aiRole]||'#aaa';
-    // Role label
+    const iCol=INTENS_COLOR[p.aiIntensity]||'#888';
+    const spd=(Math.sqrt(p.vx*p.vx+p.vy*p.vy)).toFixed(2);
+
+    // Role tag
     ctx.font=`bold 8px Arial`;ctx.textAlign='center';ctx.textBaseline='top';
-    ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(px-20,py-28,40,10);
-    ctx.fillStyle=col;ctx.fillText(p.aiRole||'?',px,py-27);
-    // Possession/zone indicator
-    const hs=G.hs_state;
-    const zone=hs.puckZone==='neutral'?'NZ':hs.puckZone==='top_oz'?'T-OZ':'B-OZ';
-    ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(px-18,py+16,36,9);
-    ctx.fillStyle='#adf';ctx.font='7px Arial';
-    ctx.fillText(`${zone}|${hs.possession||'∅'}`,px,py+17);
+    ctx.fillStyle='rgba(0,0,0,0.65)';ctx.fillRect(px-22,py-30,44,11);
+    ctx.fillStyle=col;ctx.fillText(p.aiRole||'?',px,py-29);
+    // Intensity + speed
+    ctx.fillStyle='rgba(0,0,0,0.55)';ctx.fillRect(px-20,py+16,40,10);
+    ctx.fillStyle=iCol;ctx.font='7px Arial';
+    ctx.fillText(`${p.aiIntensity||'—'} ${spd}`,px,py+17);
   });
+
+  // Controlled player speed meter
+  if(G.controlled){
+    const cp=G.controlled;
+    const spd=Math.sqrt(cp.vx*cp.vx+cp.vy*cp.vy);
+    const pct=Math.min(1,spd/MOVE.SPRINT);
+    const bx=8,by=L.H-L.ctrlH-22,bw=90,bh=8;
+    ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(bx-2,by-2,bw+4,bh+4);
+    ctx.fillStyle='#333';ctx.fillRect(bx,by,bw,bh);
+    const spdCol=pct>0.85?'#ff4444':pct>0.55?'#ffaa00':'#44ff88';
+    ctx.fillStyle=spdCol;ctx.fillRect(bx,by,bw*pct,bh);
+    ctx.fillStyle='#fff';ctx.font='bold 8px Arial';ctx.textAlign='left';
+    ctx.fillText(`PLAYER ${spd.toFixed(2)}/${MOVE.SPRINT} ft/f`,bx,by-3);
+  }
+
   // Game state banner
   const hs=G.hs_state;
-  ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillRect(0,52,L.W,16);
-  ctx.fillStyle='#0f0';ctx.font='bold 9px Arial';ctx.textAlign='left';ctx.textBaseline='top';
+  ctx.fillStyle='rgba(0,0,0,0.75)';ctx.fillRect(0,52,L.W,18);
+  ctx.fillStyle='#0f0';ctx.font='bold 8px Arial';ctx.textAlign='left';ctx.textBaseline='top';
   const carrier=hs.puckCarrier;
   const press=carrier?pressureOnCarrier(carrier).toFixed(2):'—';
-  ctx.fillText(`Zone:${hs.puckZone} | Poss:${hs.possession||'none'} | Pressure:${press} | Rush:${hs.rushTeam||'—'} | NetDanger:${hs.netFrontDanger?'YES':'no'} | Diff:${AI_CFG.DIFFICULTY}`,4,54);
+  ctx.fillText(
+    `Zone:${hs.puckZone} Poss:${hs.possession||'∅'} P:${press} Rush:${hs.rushTeam||'—'} `+
+    `Danger:${hs.netFrontDanger?'⚠':'ok'} | SPD sprint=${MOVE.SPRINT} hard=${MOVE.HARD} norm=${MOVE.NORMAL}`,
+    4,54);
 }
 
 // ===================== PHYSICS =====================
@@ -1789,9 +1839,8 @@ function updatePhysics(dt){
     }
     p.x=clamp(p.x+p.vx,RINK.P_R||2.5,RINK.W-(RINK.P_R||2.5));
     p.y=clamp(p.y+p.vy,RINK.P_R||2.5,RINK.H-(RINK.P_R||2.5));
-    if(!p.hasPuck&&p.stunTimer<=0){
-      p.vx*=CFG.FRICTION;p.vy*=CFG.FRICTION;
-    }
+    // Friction handled per-player in movement code; only apply to stunned sliding
+    if(p.stunTimer>0){p.vx*=MOVE.STUN_FRIC;p.vy*=MOVE.STUN_FRIC;}
   });
 
   // Pickup check
@@ -2064,7 +2113,8 @@ function updateCarrierAI(p,dt){
     const slotY=attackY+(isHome?28:-28);
     tx=slotX;ty=slotY;
   }
-  steerAI(p,tx,ty,CFG.AI_SPD*(DIFF[AI_CFG.DIFFICULTY]?.AI_SPD_MULT||1));
+  // Carrier: use hard skate speed; steerAI ignores forcedSpeed when role is carrier
+  steerAI(p,tx,ty,MOVE.HARD*(DIFF[AI_CFG.DIFFICULTY]?.AI_SPD_MULT||1)*(p.hasPuck?MOVE.PUCK_MULT:1));
 }
 
 // ─── LAYER 5: MAIN SKATER AI ─────────────────────────────────────────────────
@@ -2161,21 +2211,89 @@ function updateSkaterAI(p,dt){
 
   // Apply teammate spacing to avoid clustering
   const spaced=applySpacing(p,tx,ty);
-  steerAI(p,spaced.x,spaced.y,CFG.AI_SPD*spdMult);
+  // Pass undefined to let steerAI resolve speed from role/intensity
+  steerAI(p,spaced.x,spaced.y,undefined);
 }
 
 // ─── MOVEMENT HELPERS ────────────────────────────────────────────────────────
-function steerAI(p,tx,ty,maxSpd){
+
+// Resolve skating intensity for an AI player given their role and distance to target
+function getSkateIntensity(role,targetDist){
+  if(role==='chase_puck'||role==='puck_pressure')return'sprint';
+  if(role==='backcheck')return'sprint';
+  if(role==='contain'||role==='strong_support')return'hard';
+  if(role==='net_front'||role==='net_front_cover')return'hard';
+  if(targetDist<MOVE.ARRIVAL_R*0.55)return'glide';
+  return'normal';
+}
+
+// Compute per-frame speed cap given intensity string
+function intensitySpeed(intensity){
+  switch(intensity){
+    case'sprint': return MOVE.SPRINT*MOVE.AI_SPD_MULT;
+    case'hard':   return MOVE.HARD*MOVE.AI_SPD_MULT;
+    case'glide':  return MOVE.GLIDE;
+    default:      return MOVE.NORMAL*MOVE.AI_SPD_MULT;
+  }
+}
+
+// Apply arrival slowdown — reduce desired speed as player nears target
+function arrivalSpeed(desiredSpd,targetDist){
+  if(targetDist>=MOVE.ARRIVAL_R)return desiredSpd;
+  const t=Math.max(MOVE.ARRIVAL_MIN,targetDist/MOVE.ARRIVAL_R);
+  return desiredSpd*t;
+}
+
+// Limit turn rate: blends desired velocity direction toward current heading
+// Returns {vx, vy} of the limited desired velocity
+function limitTurn(p,desVx,desVy){
+  const curSpd=Math.sqrt(p.vx*p.vx+p.vy*p.vy);
+  if(curSpd<0.04) return {vx:desVx,vy:desVy}; // near-stop: allow any direction
+  const desSpd=Math.sqrt(desVx*desVx+desVy*desVy);
+  if(desSpd<0.01) return {vx:desVx,vy:desVy};
+  const curAngle=Math.atan2(p.vy,p.vx);
+  const desAngle=Math.atan2(desVy,desVx);
+  let diff=desAngle-curAngle;
+  if(diff> Math.PI)diff-=2*Math.PI;
+  if(diff<-Math.PI)diff+=2*Math.PI;
+  const absDiff=Math.abs(diff);
+  // Speed cost for sharp turns: linear from 0 cost at 0° to TURN_COST at 180°
+  const turnFraction=absDiff/Math.PI;
+  const speedMult=1-MOVE.TURN_COST*turnFraction;
+  // Limit how far heading can rotate this frame
+  const clampedDiff=Math.sign(diff)*Math.min(MOVE.TURN_RATE,absDiff);
+  const newAngle=curAngle+clampedDiff;
+  return{vx:Math.cos(newAngle)*desSpd*speedMult,
+         vy:Math.sin(newAngle)*desSpd*speedMult};
+}
+
+// Main AI steering: move player toward (tx,ty) using proper hockey skating physics
+function steerAI(p,tx,ty,forcedSpeed){
   const tdx=tx-p.x,tdy=ty-p.y;
   const td=Math.sqrt(tdx*tdx+tdy*tdy);
-  if(td>0.5){
-    const ns=Math.min(maxSpd,td*0.35+maxSpd*0.65); // smooth deceleration near target
-    const accel=td>8?0.32:0.22; // faster acceleration when far
-    p.vx+=(tdx/td*ns-p.vx)*accel;
-    p.vy+=(tdy/td*ns-p.vy)*accel;
-  }else{
-    p.vx*=0.75;p.vy*=0.75; // gentle stop at destination
-  }
+  if(td<0.3){p.vx*=MOVE.GLIDE_FRIC;p.vy*=MOVE.GLIDE_FRIC;return;}
+
+  // Determine intensity and speed cap
+  const intensity=getSkateIntensity(p.aiRole,td);
+  const baseCap=forcedSpeed!==undefined?forcedSpeed:intensitySpeed(intensity);
+  const spdCap=arrivalSpeed(baseCap,td)*(p.hasPuck?MOVE.PUCK_MULT:1);
+  // Rating scales top speed slightly
+  const ratingScale=1+(p.spd/100-0.75)*MOVE.SPD_RATING;
+
+  // Desired velocity direction × speed cap
+  const rawDesVx=(tdx/td)*spdCap*ratingScale;
+  const rawDesVy=(tdy/td)*spdCap*ratingScale;
+
+  // Apply turn rate limit
+  const{vx:desVx,vy:desVy}=limitTurn(p,rawDesVx,rawDesVy);
+
+  // Acceleration: faster accel when sprinting or chasing, slower for support glide
+  const accel=intensity==='sprint'?MOVE.ACCEL_SPRINT:
+              intensity==='glide' ?MOVE.ACCEL_SPRINT*0.7:MOVE.ACCEL_NORMAL;
+  p.vx+=(desVx-p.vx)*accel;
+  p.vy+=(desVy-p.vy)*accel;
+  // Store intensity for debug
+  p.aiIntensity=intensity;
 }
 
 function applySpacing(p,tx,ty){
@@ -2209,10 +2327,14 @@ function updateGoalieAI(goalie,dt){
 
   const tdx=targetX-goalie.x,tdy=clampedY-goalie.y;
   const td=Math.sqrt(tdx*tdx+tdy*tdy);
-  if(td>0.5){
-    const ns=Math.min(CFG.GOALIE_SPD,td);
-    goalie.vx+=(tdx/td*ns-goalie.vx)*0.3;
-    goalie.vy+=(tdy/td*ns-goalie.vy)*0.3;
+  if(td>0.3){
+    // Goalies use hard skate speed; apply arrival slowdown and glide friction
+    const goalieSpd=arrivalSpeed(MOVE.HARD*0.72,td);
+    const ns=Math.min(goalieSpd,td);
+    goalie.vx+=(tdx/td*ns-goalie.vx)*0.28;
+    goalie.vy+=(tdy/td*ns-goalie.vy)*0.28;
+  }else{
+    goalie.vx*=MOVE.GLIDE_FRIC;goalie.vy*=MOVE.GLIDE_FRIC;
   }
 
   // Save attempt - check if fast puck heading toward goal
@@ -2307,11 +2429,24 @@ function updateControlled(){
 
 function moveControlled(dt){
   const p=G.controlled;if(!p)return;
-  if(G.joyActive&&(Math.abs(G.joyDX)>0.08||Math.abs(G.joyDY)>0.08)){
-    const spd=CFG.MAX_SPD*(p.spd/100*0.4+0.6);
-    p.vx+=(G.joyDX*spd-p.vx)*0.45;
-    p.vy+=(G.joyDY*spd-p.vy)*0.45;
-  }else{p.vx*=CFG.FRICTION;p.vy*=CFG.FRICTION;}
+  const inputActive=G.joyActive&&(Math.abs(G.joyDX)>0.08||Math.abs(G.joyDY)>0.08);
+  if(inputActive){
+    // Speed cap: rating-adjusted, slower with puck
+    const ratingScale=1+(p.spd/100-0.75)*MOVE.SPD_RATING;
+    const topSpd=MOVE.SPRINT*ratingScale*(p.hasPuck?MOVE.PUCK_MULT:1);
+    // Desired velocity from joystick
+    const rawDesVx=G.joyDX*topSpd;
+    const rawDesVy=G.joyDY*topSpd;
+    // Apply turn rate limit — prevents instant 180° snapping
+    const{vx:desVx,vy:desVy}=limitTurn(p,rawDesVx,rawDesVy);
+    // Accelerate toward desired velocity
+    p.vx+=(desVx-p.vx)*MOVE.ACCEL_PLAYER;
+    p.vy+=(desVy-p.vy)*MOVE.ACCEL_PLAYER;
+  }else{
+    // No input — glide to a natural stop (skating inertia)
+    p.vx*=MOVE.GLIDE_FRIC;
+    p.vy*=MOVE.GLIDE_FRIC;
+  }
 }
 
 function doShoot(type){
