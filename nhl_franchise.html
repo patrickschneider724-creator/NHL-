@@ -1081,7 +1081,7 @@ const G={
   players:[],puck:null,controlled:null,
   lastTime:0,layout:null,
   joyActive:false,joyTid:-1,joyCX:0,joyCY:0,joyDX:0,joyDY:0,
-  btnState:{pass:false,shoot:false,slap:false,check:false,poke:false},
+  btnState:{cross:false,circle:false,triangle:false,square:false},
   slapCharging:false,slapCharge:0,slapTid:-1,
   stateTimer:0,goalTeam:'',goalFlash:false,
   activeTouches:{},lastGoalCheck:0,
@@ -1091,31 +1091,31 @@ const G={
 function computeLayout(){
   const W=canvas.width,H=canvas.height;
   const ctrlH=Math.min(225,H*0.28);
-  const hudH=52; // scoreboard height - rink must start below this
+  const hudH=52;
   const gameH=H-ctrlH;
-  const availH=gameH-hudH; // usable vertical space for rink
-  const scale=Math.min(W/RINK.W,availH/RINK.H); // fill available space fully
+  const availH=gameH-hudH;
+  const scale=Math.min(W/RINK.W,availH/RINK.H);
   const rw=RINK.W*scale,rh=RINK.H*scale;
   const rx=(W-rw)/2;
-  const ry=hudH+(availH-rh)/2; // offset below HUD, centered in remaining space
+  const ry=hudH+(availH-rh)/2;
   const jR=Math.min(55,ctrlH*0.42);
   const jX=W*0.18,jY=H-ctrlH*0.5;
-  const bW=Math.min(78,W*0.19);
-  const bH=Math.min(52,ctrlH*0.37);
-  const bGap=Math.min(10,W*0.025);
-  const bsX=W*0.50;
-  const br1=H-ctrlH+ctrlH*0.12;
-  const br2=H-ctrlH+ctrlH*0.49;
-  const br3=H-ctrlH+ctrlH*0.77;
+  // PlayStation diamond button cluster
+  const bcx=W*0.76, bcy=H-ctrlH*0.5;
+  const bsp=Math.min(40,ctrlH*0.32); // spacing from center to each button
+  const br=Math.min(27,ctrlH*0.21);  // button radius
+  // Face-off button (between joystick and PS cluster)
+  const foR=Math.min(32,ctrlH*0.26);
+  const foX=W*0.47, foY=H-ctrlH*0.5;
   return{W,H,ctrlH,gameH,
     rink:{x:rx,y:ry,w:rw,h:rh,scale:scale},
     joy:{x:jX,y:jY,r:jR,kr:jR*0.38},
+    faceoff:{x:foX,y:foY,r:foR},
     btns:{
-      pass:{x:bsX,y:br1,w:bW,h:bH,label:'PASS',color:'#2563eb'},
-      shoot:{x:bsX+bW+bGap,y:br1,w:bW,h:bH,label:'SHOOT',color:'#dc2626'},
-      slap:{x:bsX,y:br2,w:bW,h:bH,label:'SLAP',color:'#c2410c'},
-      check:{x:bsX+bW+bGap,y:br2,w:bW,h:bH,label:'CHECK',color:'#b45309'},
-      poke:{x:bsX+(bW+bGap)/2,y:br3,w:bW,h:bH,label:'POKE',color:'#16a34a'},
+      cross:    {x:bcx,       y:bcy+bsp, r:br, sym:'✕', label:'PASS',  color:'#5b8cff'},
+      circle:   {x:bcx+bsp,   y:bcy,     r:br, sym:'○', label:'SHOOT', color:'#ff5555'},
+      triangle: {x:bcx,       y:bcy-bsp, r:br, sym:'△', label:'SLAP',  color:'#44cc88'},
+      square:   {x:bcx-bsp,   y:bcy,     r:br, sym:'□', label:'DEF',   color:'#dd55dd'},
     }
   };
 }
@@ -1451,44 +1451,66 @@ function drawHUD(ctx,L){
 }
 
 function drawControls(ctx,L){
-  const{W,H,ctrlH,btns,joy}=L;
+  const{W,H,ctrlH,btns,joy,faceoff}=L;
   // Control area background
-  ctx.fillStyle='rgba(5,8,20,0.9)';
+  ctx.fillStyle='rgba(5,8,20,0.92)';
   ctx.fillRect(0,H-ctrlH,W,ctrlH);
   ctx.fillStyle='rgba(255,255,255,0.08)';
   ctx.fillRect(0,H-ctrlH,W,1);
 
   // Joystick base
-  ctx.strokeStyle='rgba(255,255,255,0.2)';ctx.lineWidth=2;
+  ctx.strokeStyle='rgba(255,255,255,0.25)';ctx.lineWidth=2;
   ctx.beginPath();ctx.arc(joy.x,joy.y,joy.r,0,Math.PI*2);ctx.stroke();
-  // Crosshairs
   ctx.strokeStyle='rgba(255,255,255,0.1)';ctx.lineWidth=1;
   ctx.beginPath();ctx.moveTo(joy.x-joy.r,joy.y);ctx.lineTo(joy.x+joy.r,joy.y);ctx.stroke();
   ctx.beginPath();ctx.moveTo(joy.x,joy.y-joy.r);ctx.lineTo(joy.x,joy.y+joy.r);ctx.stroke();
-  // Joystick knob
   const kx=joy.x+G.joyDX*joy.r,ky=joy.y+G.joyDY*joy.r;
-  ctx.fillStyle='rgba(255,255,255,0.4)';
+  ctx.fillStyle='rgba(255,255,255,0.45)';
   ctx.beginPath();ctx.arc(kx,ky,joy.kr,0,Math.PI*2);ctx.fill();
 
-  // Buttons
+  // PlayStation diamond buttons
   Object.entries(btns).forEach(([name,b])=>{
-    const pressed=G.btnState[name]||(name==='slap'&&G.slapCharging);
-    const alpha=pressed?0.95:0.7;
-    // Button background
-    ctx.globalAlpha=alpha;
-    ctx.fillStyle=b.color;
-    roundRect(ctx,b.x,b.y,b.w,b.h,8);ctx.fill();
-    // Slap charge indicator
-    if(name==='slap'&&G.slapCharging){
-      ctx.fillStyle='rgba(255,255,255,0.3)';
-      roundRect(ctx,b.x,b.y,b.w*(G.slapCharge/0.5),b.h,8);ctx.fill();
+    const pressed=G.btnState[name]||(name==='triangle'&&G.slapCharging);
+    ctx.globalAlpha=pressed?1:0.72;
+    // Dark circle fill
+    ctx.fillStyle='rgba(8,12,26,0.95)';
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();
+    // Colored ring
+    ctx.strokeStyle=b.color;ctx.lineWidth=pressed?3:2;
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.stroke();
+    // Slap charge pie fill
+    if(name==='triangle'&&G.slapCharging){
+      ctx.fillStyle=b.color+'55';
+      ctx.beginPath();ctx.moveTo(b.x,b.y);
+      ctx.arc(b.x,b.y,b.r,-Math.PI/2,-Math.PI/2+(Math.PI*2*(G.slapCharge/0.5)));
+      ctx.closePath();ctx.fill();
     }
     ctx.globalAlpha=1;
-    // Label
-    ctx.fillStyle='#fff';ctx.font=`bold 11px -apple-system,Arial`;
+    // Symbol
+    ctx.fillStyle=pressed?'#fff':b.color;
+    ctx.font=`bold ${Math.round(b.r*0.9)}px Arial`;
     ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.fillText(b.label,b.x+b.w/2,b.y+b.h/2);
+    ctx.fillText(b.sym,b.x,b.y+(name==='triangle'?1:0));
+    // Small action label below
+    ctx.fillStyle='rgba(255,255,255,0.35)';
+    ctx.font=`${Math.round(b.r*0.38)}px Arial`;
+    ctx.fillText(b.label,b.x,b.y+b.r+9);
   });
+
+  // Face-off button — pulsing gold, shown when waiting for face-off
+  if(G.state==='faceoff'){
+    const pulse=0.65+0.35*Math.abs(Math.sin(Date.now()/400));
+    ctx.globalAlpha=pulse;
+    ctx.fillStyle='#fbbf24';
+    ctx.beginPath();ctx.arc(faceoff.x,faceoff.y,faceoff.r,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(faceoff.x,faceoff.y,faceoff.r,0,Math.PI*2);ctx.stroke();
+    ctx.globalAlpha=1;
+    ctx.fillStyle='#000';
+    ctx.font=`bold ${Math.round(faceoff.r*0.38)}px -apple-system,Arial`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('FACE-OFF',faceoff.x,faceoff.y);
+  }
 }
 
 function roundRect(ctx,x,y,w,h,r){
@@ -1821,18 +1843,37 @@ function doPoke(){
 // ===================== TOUCH INPUT =====================
 function hitTestButtons(x,y){
   const L=G.layout;if(!L)return null;
+  // Face-off button (only active when waiting for face-off)
+  if(G.state==='faceoff'){
+    const fo=L.faceoff;
+    if(Math.hypot(x-fo.x,y-fo.y)<=fo.r+10)return'faceoff';
+  }
+  // PS diamond buttons (circular hit test)
   for(const[name,b]of Object.entries(L.btns)){
-    if(x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h)return name;
+    if(Math.hypot(x-b.x,y-b.y)<=b.r+8)return name;
   }
   return null;
 }
 
 function handleButtonPress(name){
-  if(name==='pass')doPass();
-  else if(name==='shoot')doShoot('wrist');
-  else if(name==='slap'){G.slapCharging=true;G.slapCharge=0;}
-  else if(name==='check')doCheck();
-  else if(name==='poke')doPoke();
+  if(name==='cross')doPass();
+  else if(name==='circle')doShoot('wrist');
+  else if(name==='triangle'){G.slapCharging=true;G.slapCharge=0;}
+  else if(name==='square')doDefend();
+  else if(name==='faceoff'){G.stateTimer=0;G.state='playing';}
+}
+
+function doDefend(){
+  // Smart defensive action: poke if near carrier, body check if very close
+  const p=G.controlled;if(!p)return;
+  const carrier=G.players.find(x=>x.hasPuck&&x.team!==p.team);
+  if(carrier){
+    const d=dist(p.x,p.y,carrier.x,carrier.y);
+    if(d<=CFG.CHECK_R)doCheck();
+    else doPoke();
+  }else{
+    doCheck();
+  }
 }
 
 function onTouchStart(e){
@@ -1840,8 +1881,8 @@ function onTouchStart(e){
   for(const t of e.changedTouches){
     const x=t.clientX,y=t.clientY;
     const L=G.layout;if(!L)continue;
-    // Joystick zone: left 46% of screen, bottom control area
-    if(x<L.W*0.46&&y>L.H-L.ctrlH){
+    // Joystick zone: left 38% of screen, bottom control area
+    if(x<L.W*0.38&&y>L.H-L.ctrlH){
       G.joyActive=true;G.joyTid=t.identifier;
       G.joyCX=x;G.joyCY=y;G.joyDX=0;G.joyDY=0;
       G.activeTouches[t.identifier]='joy';
@@ -1851,7 +1892,7 @@ function onTouchStart(e){
         G.btnState[btn]=true;
         G.activeTouches[t.identifier]='btn:'+btn;
         handleButtonPress(btn);
-        if(btn==='slap')G.slapTid=t.identifier;
+        if(btn==='triangle')G.slapTid=t.identifier;
       }
     }
   }
@@ -1879,8 +1920,7 @@ function onTouchEnd(e){
     else if(info&&info.startsWith('btn:')){
       const btn=info.split(':')[1];
       G.btnState[btn]=false;
-      if(btn==='slap'&&G.slapCharging){
-        // Fire slap shot if charged
+      if(btn==='triangle'&&G.slapCharging){
         if(G.slapCharge>=0.35)doShoot('slap');
         G.slapCharging=false;G.slapCharge=0;
       }
