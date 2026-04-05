@@ -93,6 +93,30 @@ P_R:2.5,PUCK_R:0.5,MAX_SPD:3.5,FRICTION:0.92,PUCK_FRIC:0.988,
 WRIST_SPD:14,SLAP_SPD:20,PASS_SPD:9,AI_SPD:1.5,GOALIE_SPD:1.6,
 PICKUP_R:5.0,CHECK_R:5,POKE_R:5,SLAP_THRESHOLD:0.25,INPUT_BUFFER:0.12};
 
+// ===================== AI CONFIG =====================
+const AI_CFG={
+  PRESSURE_RADIUS:14,    // ft — within this range, defender actively pressures
+  SUPPORT_DIST:18,       // ft — ideal support distance from puck carrier
+  SLOT_X1:28,SLOT_X2:57,// slot horizontal boundaries
+  SLOT_DEPTH:38,         // ft from goal line into slot
+  SPACING_MIN:10,        // ft minimum spacing between same-team skaters
+  PASS_WILLINGNESS:0.65, // 0-1 how eagerly AI looks to pass
+  SHOT_WILLINGNESS:0.55,
+  DUMP_THRESHOLD:0.72,   // pressure score to dump/chip puck
+  BACKCHECK_URGENCY:1.3, // speed multiplier when backchecking
+  REACTION_TICKS:8,      // frames before AI acts on new info (higher=dumber)
+  AGGRESSION:0.6,        // 0-1
+  // Difficulty presets applied at runtime
+  DIFFICULTY:'medium',   // 'easy'|'medium'|'hard'
+};
+
+// Difficulty tables
+const DIFF={
+  easy:  {REACTION_TICKS:18,PASS_WILLINGNESS:0.35,SHOT_WILLINGNESS:0.35,AGGRESSION:0.35,AI_SPD_MULT:0.82},
+  medium:{REACTION_TICKS:8, PASS_WILLINGNESS:0.65,SHOT_WILLINGNESS:0.55,AGGRESSION:0.60,AI_SPD_MULT:1.00},
+  hard:  {REACTION_TICKS:3, PASS_WILLINGNESS:0.85,SHOT_WILLINGNESS:0.75,AGGRESSION:0.85,AI_SPD_MULT:1.12},
+};
+
 // ===================== 32 NHL TEAMS =====================
 const TEAMS=[
 {id:'BOS',city:'Boston',name:'Bruins',conf:'E',div:'Atlantic',p:'#FFB81C',s:'#000000',r:84,stars:['Brad Marchand','David Pastrnak','Jeremy Swayman']},
@@ -1087,6 +1111,10 @@ const G={
   stateTimer:0,goalTeam:'',goalFlash:false,
   activeTouches:{},lastGoalCheck:0,
   ot:false,shootout:false,
+  // Hockey AI state
+  hs_state:{possession:null,puckZone:'neutral',gameMode:'neutral',
+            netFrontDanger:false,rushTeam:null},
+  aiDebug:false,
 };
 
 function computeLayout(){
@@ -1150,6 +1178,7 @@ function startGameplay(){
   Object.keys(G.btnState).forEach(k=>G.btnState[k]=false);
   G.shootCharging=false;G.shootCharge=0;G.shootPressTime=0;
   G.bufferedShotUntil=0;G.puckTrail=[];G.screenShake={x:0,y:0,timer:0};
+  G.hs_state={possession:null,puckZone:'neutral',gameMode:'neutral',netFrontDanger:false,rushTeam:null};
 
   function getRoster(team,td){
     const r=team.roster||[];
@@ -1507,6 +1536,10 @@ function drawHUD(ctx,L){
   ctx.fillRect(0,0,W,hudH);
   ctx.fillStyle='rgba(255,255,255,0.1)';
   ctx.fillRect(0,hudH-1,W,1);
+  // Debug toggle hint (top-right corner)
+  ctx.fillStyle=G.aiDebug?'#0f0':'rgba(255,255,255,0.18)';
+  ctx.font='bold 9px Arial';ctx.textAlign='right';ctx.textBaseline='top';
+  ctx.fillText('DBG',W-4,4);
 
   const htd=teamById(G.homeId)||{p:'#555',id:'HOM'};
   const atd=teamById(G.awayId)||{p:'#555',id:'AWY'};
@@ -1677,8 +1710,43 @@ function render(){
   if(!G.puck.carrier||(G.puck.carrier&&!G.puck.carrier.isGoalie))drawPuck(ctx2,L);
   if(sk.timer>0){ctx2.restore();}
   drawHUD(ctx2,L);
+  if(G.aiDebug)drawAIDebug(ctx2,L);
   drawControls(ctx2,L);
 }
+
+function drawAIDebug(ctx,L){
+  const ROLE_COLOR={
+    carrier:'#ffff00',strong_support:'#00ff88',weak_support:'#00cc44',
+    net_front:'#ff6600',high_slot:'#ffaa00',point_left:'#88aaff',point_right:'#88aaff',
+    puck_pressure:'#ff3333',contain:'#ff8888',slot_cover:'#ff44ff',
+    net_front_cover:'#dd00dd',weak_side:'#aa44aa',
+    chase_puck:'#ffffff',support_puck:'#cccccc',transition_shape:'#666688',
+    backcheck:'#ff8800',
+  };
+  G.players.forEach(p=>{
+    if(p.isGoalie)return;
+    const px=gx(p.x),py=gy(p.y);
+    const col=ROLE_COLOR[p.aiRole]||'#aaa';
+    // Role label
+    ctx.font=`bold 8px Arial`;ctx.textAlign='center';ctx.textBaseline='top';
+    ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(px-20,py-28,40,10);
+    ctx.fillStyle=col;ctx.fillText(p.aiRole||'?',px,py-27);
+    // Possession/zone indicator
+    const hs=G.hs_state;
+    const zone=hs.puckZone==='neutral'?'NZ':hs.puckZone==='top_oz'?'T-OZ':'B-OZ';
+    ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(px-18,py+16,36,9);
+    ctx.fillStyle='#adf';ctx.font='7px Arial';
+    ctx.fillText(`${zone}|${hs.possession||'∅'}`,px,py+17);
+  });
+  // Game state banner
+  const hs=G.hs_state;
+  ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillRect(0,52,L.W,16);
+  ctx.fillStyle='#0f0';ctx.font='bold 9px Arial';ctx.textAlign='left';ctx.textBaseline='top';
+  const carrier=hs.puckCarrier;
+  const press=carrier?pressureOnCarrier(carrier).toFixed(2):'—';
+  ctx.fillText(`Zone:${hs.puckZone} | Poss:${hs.possession||'none'} | Pressure:${press} | Rush:${hs.rushTeam||'—'} | NetDanger:${hs.netFrontDanger?'YES':'no'} | Diff:${AI_CFG.DIFFICULTY}`,4,54);
+}
+
 // ===================== PHYSICS =====================
 function updatePhysics(dt){
   const puck=G.puck;
@@ -1756,73 +1824,253 @@ function checkGoal(side){
 function getAttackY(team){return team==='home'?RINK.GL_TOP:RINK.GL_BOT;}
 function getDefendY(team){return team==='home'?RINK.GL_BOT:RINK.GL_TOP;}
 
-// Zone helpers — is puck in this team's offensive / defensive zone?
-function puckInOZ(team){
-  const py=G.puck.carrier?G.puck.carrier.y:G.puck.y;
-  return team==='home'?py<RINK.BL_TOP:py>RINK.BL_BOT;
+// ─── LAYER 1: GAME STATE ────────────────────────────────────────────────────
+function getPuckY(){return G.puck.carrier?G.puck.carrier.y:G.puck.y;}
+function getPuckX(){return G.puck.carrier?G.puck.carrier.x:G.puck.x;}
+function puckInOZ(team){const py=getPuckY();return team==='home'?py<RINK.BL_TOP:py>RINK.BL_BOT;}
+function puckInDZ(team){const py=getPuckY();return team==='home'?py>RINK.BL_BOT:py<RINK.BL_TOP;}
+function puckInNZ(){const py=getPuckY();return py>=RINK.BL_TOP&&py<=RINK.BL_BOT;}
+function isInSlot(x,y,team){
+  const gline=getDefendY(team);
+  const depth=AI_CFG.SLOT_DEPTH;
+  const inSlotX=x>=AI_CFG.SLOT_X1&&x<=AI_CFG.SLOT_X2;
+  const inSlotY=team==='home'?y>=(gline-depth)&&y<=gline:y>=gline&&y<=(gline+depth);
+  return inSlotX&&inSlotY;
 }
-function puckInDZ(team){
-  const py=G.puck.carrier?G.puck.carrier.y:G.puck.y;
-  return team==='home'?py>RINK.BL_BOT:py<RINK.BL_TOP;
+function pressureOnCarrier(carrier){
+  // Returns 0-1 pressure score on a ball carrier
+  if(!carrier)return 0;
+  let score=0;
+  G.players.forEach(p=>{
+    if(p.team===carrier.team||p.isGoalie)return;
+    const d=dist(p.x,p.y,carrier.x,carrier.y);
+    if(d<AI_CFG.PRESSURE_RADIUS)score+=1-d/AI_CFG.PRESSURE_RADIUS;
+  });
+  return Math.min(1,score);
 }
 
-// Where each role should be when team is attacking (OZ)
-function getOZPos(role,team,puckX){
+function updateHockeyState(){
+  const hs=G.hs_state;
+  const carrier=G.players.find(p=>p.hasPuck)||null;
+  hs.possession=carrier?carrier.team:null;
+  hs.puckCarrier=carrier;
+  const py=getPuckY();
+  hs.puckZone=py<RINK.BL_TOP?'top_oz':py>RINK.BL_BOT?'bot_oz':'neutral';
+  // Net-front danger: enemy near slot
+  hs.netFrontDanger=G.players.some(p=>{
+    if(!carrier||p.team===carrier.team||p.isGoalie)return false;
+    return isInSlot(p.x,p.y,carrier.team);
+  });
+  // Game mode per team determined per-player in AI update
+  // Rush state: carrier moving fast toward OZ
+  if(carrier){
+    const spd=Math.sqrt(carrier.vx**2+carrier.vy**2);
+    const movingToOZ=carrier.team==='home'?carrier.vy<-0.5:carrier.vy>0.5;
+    hs.rushTeam=(spd>1.2&&puckInNZ()&&movingToOZ)?carrier.team:null;
+  }else{hs.rushTeam=null;}
+}
+
+// ─── LAYER 2: DYNAMIC ROLE ASSIGNMENT ───────────────────────────────────────
+function assignAIRoles(){
+  const hs=G.hs_state;
+  const carrier=hs.puckCarrier;
+  // Separate players by team, non-goalies
+  ['home','away'].forEach(team=>{
+    const skaters=G.players.filter(p=>p.team===team&&!p.isGoalie&&p!==G.controlled);
+    const myCarrier=carrier&&carrier.team===team?carrier:null;
+    const hasPossession=hs.possession===team;
+
+    if(hasPossession&&myCarrier){
+      // Assign offensive roles
+      const nonCarriers=skaters.filter(p=>p!==myCarrier);
+      // Sort by distance to carrier
+      const byDist=nonCarriers.slice().sort((a,b)=>
+        dist(a.x,a.y,myCarrier.x,myCarrier.y)-dist(b.x,b.y,myCarrier.x,myCarrier.y));
+
+      myCarrier.aiRole='carrier';
+      // Closest non-defender → strong_support
+      const fwds=byDist.filter(p=>p.role==='C'||p.role==='LW'||p.role==='RW');
+      const defs=byDist.filter(p=>p.role==='LD'||p.role==='RD');
+      if(fwds[0])fwds[0].aiRole='strong_support';
+      if(fwds[1])fwds[1].aiRole=puckInOZ(team)?'net_front':'weak_support';
+      if(fwds[2])fwds[2].aiRole='high_slot';
+      defs.forEach((d,i)=>d.aiRole=i===0?'point_left':'point_right');
+    }else if(!hasPossession&&carrier){
+      // Assign defensive roles
+      const skatersByDistToCarrier=skaters.slice().sort((a,b)=>
+        dist(a.x,a.y,carrier.x,carrier.y)-dist(b.x,b.y,carrier.x,carrier.y));
+      skatersByDistToCarrier[0].aiRole='puck_pressure';
+      if(skatersByDistToCarrier[1])skatersByDistToCarrier[1].aiRole='contain';
+      // Slot cover goes to whoever is best positioned (center of ice)
+      const slotPlayer=skatersByDistToCarrier.slice(2).reduce((best,p)=>
+        Math.abs(p.x-42.5)<Math.abs(best.x-42.5)?p:best,
+        skatersByDistToCarrier[2]||skatersByDistToCarrier[1]||skatersByDistToCarrier[0]);
+      if(slotPlayer&&!slotPlayer.aiRole)slotPlayer.aiRole='slot_cover';
+      skaters.filter(p=>!p.aiRole).forEach(p=>
+        p.aiRole=p.role==='LD'||p.role==='RD'?'net_front_cover':'weak_side');
+    }else{
+      // Loose puck — transition roles
+      const byDistToPuck=skaters.slice().sort((a,b)=>
+        dist(a.x,a.y,getPuckX(),getPuckY())-dist(b.x,b.y,getPuckX(),getPuckY()));
+      byDistToPuck[0].aiRole='chase_puck';
+      if(byDistToPuck[1])byDistToPuck[1].aiRole='support_puck';
+      skaters.filter(p=>!p.aiRole).forEach(p=>p.aiRole='transition_shape');
+    }
+  });
+}
+
+// ─── LAYER 3: POSITION GENERATORS ────────────────────────────────────────────
+function getOZSupportPos(role,team,carrierX,carrierY){
   const isHome=team==='home';
-  const oz=isHome?22:178; // slot depth
-  const bl=isHome?RINK.BL_TOP+4:RINK.BL_BOT-4; // blue line hold
-  switch(role){
-    case 'LW': return{x:clamp(puckX-24,5,32),y:isHome?oz+8:oz-8};
-    case 'RW': return{x:clamp(puckX+24,53,80),y:isHome?oz+8:oz-8};
-    case 'C':  return{x:clamp(puckX,30,55),y:isHome?oz+16:oz-16};
-    case 'LD': return{x:clamp(puckX-12,5,40),y:bl};
-    case 'RD': return{x:clamp(puckX+12,45,80),y:bl};
-    default:   return{x:42.5,y:isHome?oz:oz};
+  const atkGL=getAttackY(team);
+  const bl=isHome?RINK.BL_TOP+5:RINK.BL_BOT-5;
+  // Strong-side support: open triangle point near carrier, same side of ice
+  if(role==='strong_support'){
+    const side=carrierX>42.5?-1:1; // opposite side of carrier for triangle
+    return{x:clamp(carrierX+side*18,6,79),y:clamp(carrierY+(isHome?8:-8),isHome?20:120,isHome?80:180)};
   }
+  if(role==='net_front'){
+    // Front of crease, contested but dangerous
+    return{x:clamp(carrierX+(Math.random()>0.5?6:-6),32,53),y:atkGL+(isHome?20:-20)};
+  }
+  if(role==='weak_support'){
+    const side=carrierX>42.5?-1:1;
+    return{x:clamp(42.5+side*22,8,77),y:clamp(carrierY+(isHome?-4:4),isHome?15:115,isHome?75:185)};
+  }
+  if(role==='high_slot'){
+    return{x:clamp(carrierX,28,57),y:atkGL+(isHome?32:-32)};
+  }
+  if(role==='point_left')return{x:clamp(getPuckX()-14,5,38),y:bl};
+  if(role==='point_right')return{x:clamp(getPuckX()+14,47,80),y:bl};
+  return{x:42.5,y:bl};
 }
 
-// Where each role should be in neutral zone
-function getNZPos(role,team){
+function getDZCoveragePos(role,team,carrierX,carrierY){
+  const isHome=team==='home';
+  const defGL=getDefendY(team);
+  const bl=isHome?RINK.BL_BOT-4:RINK.BL_TOP+4;
+  const slotY=defGL+(isHome?-25:25);
+  if(role==='puck_pressure'){
+    // Approach carrier at an angle — intercept their movement path
+    const spd=Math.sqrt((G.hs_state.puckCarrier?.vx||0)**2+(G.hs_state.puckCarrier?.vy||0)**2);
+    const lead=spd>0.3?5:0;
+    return{
+      x:clamp(carrierX+(G.hs_state.puckCarrier?.vx||0)*lead,3,RINK.W-3),
+      y:clamp(carrierY+(G.hs_state.puckCarrier?.vy||0)*lead,3,RINK.H-3)
+    };
+  }
+  if(role==='contain'){
+    // Position between carrier and goal, maintain gap
+    const dx=42.5-carrierX,dy=defGL-carrierY;
+    const d=Math.sqrt(dx*dx+dy*dy)||1;
+    return{x:clamp(carrierX+dx/d*12,6,79),y:clamp(carrierY+dy/d*12,6,RINK.H-6)};
+  }
+  if(role==='slot_cover'){
+    // Protect center-slot, float between puck and goal mouth
+    return{x:clamp(carrierX*0.4+42.5*0.6,28,57),y:slotY};
+  }
+  if(role==='net_front_cover'){
+    return{x:42.5+(carrierX>42.5?-8:8),y:defGL+(isHome?-14:14)};
+  }
+  if(role==='weak_side'){
+    // Cover far post / weak-side passing lane
+    const side=carrierX>42.5?-1:1;
+    return{x:42.5+side*20,y:clamp(carrierY,isHome?defGL-40:defGL,isHome?defGL:defGL+40)};
+  }
+  // Fallback: hold blue line
+  return{x:carrierX>42.5?60:25,y:bl};
+}
+
+function getNZShapePos(role,team){
   const isHome=team==='home';
   switch(role){
-    case 'LW': return{x:18,y:isHome?115:85};
-    case 'RW': return{x:67,y:isHome?115:85};
-    case 'C':  return{x:42.5,y:isHome?108:92};
-    case 'LD': return{x:22,y:isHome?138:62};
-    case 'RD': return{x:63,y:isHome?138:62};
+    case 'LW': return{x:16,y:isHome?112:88};
+    case 'RW': return{x:69,y:isHome?112:88};
+    case 'C':  return{x:42.5,y:isHome?105:95};
+    case 'LD': return{x:20,y:isHome?135:65};
+    case 'RD': return{x:65,y:isHome?135:65};
     default:   return{x:42.5,y:100};
   }
 }
 
-// Where each role should be defending (DZ) — cover zones, not just chase puck
-function getDZPos(role,team,puckX,puckY){
+function getBreakoutPos(role,team,carrierX,carrierY){
   const isHome=team==='home';
-  const gline=isHome?RINK.GL_BOT:RINK.GL_TOP;
-  const bl=isHome?RINK.BL_BOT:RINK.BL_TOP;
-  const atkDir=isHome?1:-1;
+  const boards_l=8,boards_r=77;
   switch(role){
-    case 'LW':
-      // Left-wall pressure near puck, but don't go deeper than puck
-      return{x:clamp(puckX-16,5,38),y:isHome?clamp(puckY,bl-5,gline-15):clamp(puckY,gline+15,bl+5)};
-    case 'RW':
-      return{x:clamp(puckX+16,47,80),y:isHome?clamp(puckY,bl-5,gline-15):clamp(puckY,gline+15,bl+5)};
-    case 'C':
-      // Cover the slot — stay between puck and goal, don't chase corners
-      return{x:clamp(puckX,28,57),y:isHome?clamp(gline-35,gline-50,puckY-5):clamp(gline+35,puckY+5,gline+50)};
-    case 'LD':
-      // Left D: stay on left side between puck and goal, hold blue line when puck is out
-      if(isHome?puckY<bl:puckY>bl)return{x:clamp(puckX-10,5,42),y:bl+(isHome?-4:4)};
-      return{x:clamp(puckX-12,5,38),y:isHome?clamp(gline-20,gline-40,puckY-8):clamp(gline+20,puckY+8,gline+40)};
-    case 'RD':
-      if(isHome?puckY<bl:puckY>bl)return{x:clamp(puckX+10,43,80),y:bl+(isHome?-4:4)};
-      return{x:clamp(puckX+12,47,80),y:isHome?clamp(gline-20,gline-40,puckY-8):clamp(gline+20,puckY+8,gline+40)};
-    default: return getNZPos(role,team);
+    case 'carrier':   return{x:carrierX,y:carrierY}; // handled in carrier AI
+    case 'strong_support': return{x:isHome?boards_l:boards_r,y:clamp(carrierY+(isHome?-5:5),isHome?160:15,isHome?185:40)};
+    case 'weak_support':   return{x:isHome?boards_r:boards_l,y:clamp(carrierY+(isHome?-5:5),isHome?160:15,isHome?185:40)};
+    case 'high_slot':      return{x:42.5,y:isHome?160:40};
+    case 'point_left':  return{x:20,y:isHome?RINK.BL_BOT-8:RINK.BL_TOP+8};
+    case 'point_right': return{x:65,y:isHome?RINK.BL_BOT-8:RINK.BL_TOP+8};
+    default: return getNZShapePos(role,team);
   }
 }
 
-function getDefaultPos(role,team){return getNZPos(role,team);}
+// ─── LAYER 4: PUCK CARRIER AI ────────────────────────────────────────────────
+function updateCarrierAI(p,dt){
+  const isHome=p.team==='home';
+  const attackY=getAttackY(p.team);
+  const pressure=pressureOnCarrier(p);
+  const inOZ=puckInOZ(p.team);
+  const inNZ=puckInNZ();
+  const inDZ=puckInDZ(p.team);
+  const diff=DIFF[AI_CFG.DIFFICULTY]||DIFF.medium;
 
+  // Always scan: pass, shoot, or carry
+  // Heavy pressure → immediate pass/dump
+  if(pressure>AI_CFG.DUMP_THRESHOLD&&p.aiShootCD<=0){
+    if(Math.random()<diff.PASS_WILLINGNESS*1.4){
+      if(aiTryPass(p)){p.aiShootCD=1.2;return;}
+    }
+  }
+
+  // Moderate pressure in DZ → look to outlet pass immediately
+  if(inDZ&&pressure>0.25&&p.aiShootCD<=0&&Math.random()<diff.PASS_WILLINGNESS*1.1){
+    if(aiTryPass(p)){p.aiShootCD=1.0;return;}
+  }
+
+  // In OZ — shoot if open lane, else cycle/pass
+  if(inOZ){
+    const goalDist=Math.abs(p.y-attackY);
+    const inDangerousLane=p.x>=20&&p.x<=65&&goalDist<45;
+    if(inDangerousLane&&p.aiShootCD<=0&&Math.random()<diff.SHOT_WILLINGNESS*(pressure<0.3?1.2:0.7)){
+      aiShoot(p);p.aiShootCD=2.2;return;
+    }
+    // Cycle: pass to open man and find soft ice
+    if(p.aiShootCD<=0&&Math.random()<diff.PASS_WILLINGNESS*0.6){
+      if(aiTryPass(p)){p.aiShootCD=0.9;return;}
+    }
+  }
+
+  // NZ with puck — pass or skate into OZ
+  if(inNZ&&p.aiShootCD<=0&&Math.random()<diff.PASS_WILLINGNESS*0.5){
+    if(aiTryPass(p)){p.aiShootCD=1.2;return;}
+  }
+
+  // Movement target: keep feet moving, advance toward OZ when possible
+  let tx,ty;
+  if(inDZ){
+    // Breakout: move to boards, then up
+    const toBoards=p.x<42.5?8:77;
+    tx=toBoards;ty=p.y+(isHome?-1.5:1.5); // inch toward NZ
+  }else if(inNZ){
+    // Carry up ice with purpose, stay in lane by role
+    const nz=getNZShapePos(p.role,p.team);
+    tx=nz.x;ty=p.y+(isHome?-2.5:2.5);
+  }else{
+    // OZ: drive toward slot / net area, find angle
+    const slotX=clamp(p.x,22,63);
+    const slotY=attackY+(isHome?28:-28);
+    tx=slotX;ty=slotY;
+  }
+  steerAI(p,tx,ty,CFG.AI_SPD*(DIFF[AI_CFG.DIFFICULTY]?.AI_SPD_MULT||1));
+}
+
+// ─── LAYER 5: MAIN SKATER AI ─────────────────────────────────────────────────
 function updateAllAI(dt){
+  updateHockeyState();
+  assignAIRoles();
   G.players.forEach(p=>{
     if(p===G.controlled||p.stunTimer>0)return;
     if(p.aiShootCD>0)p.aiShootCD-=dt;
@@ -1832,102 +2080,123 @@ function updateAllAI(dt){
 }
 
 function updateSkaterAI(p,dt){
-  const puck=G.puck;
-  const puckCarrier=G.players.find(x=>x.hasPuck);
+  const hs=G.hs_state;
+  const carrier=hs.puckCarrier;
   const isHome=p.team==='home';
-  const attackY=getAttackY(p.team);
-  const puckX=puckCarrier?puckCarrier.x:puck.x;
-  const puckY=puckCarrier?puckCarrier.y:puck.y;
-  const isDefender=p.role==='LD'||p.role==='RD';
+  const hasPossession=hs.possession===p.team;
+  const diff=DIFF[AI_CFG.DIFFICULTY]||DIFF.medium;
+  const spdMult=diff.AI_SPD_MULT||1;
+
+  // Carrier gets special handling
+  if(p.hasPuck){updateCarrierAI(p,dt);return;}
+
+  const carrierX=carrier?carrier.x:getPuckX();
+  const carrierY=carrier?carrier.y:getPuckY();
+  const myD=dist(p.x,p.y,carrierX,carrierY);
   let tx=p.x,ty=p.y;
 
-  if(!puckCarrier){
-    // Loose puck — only the closest player on each team chases; others drift to position
-    const teammates=G.players.filter(x=>x.team===p.team&&!x.isGoalie);
-    const myD=dist(p.x,p.y,puck.x,puck.y);
-    const numCloser=teammates.filter(x=>x!==p&&dist(x.x,x.y,puck.x,puck.y)<myD).length;
-    // Defenders only chase if no forward is closer
-    const shouldChase=isDefender?(numCloser===0):(numCloser<=1);
-    if(shouldChase){tx=puck.x;ty=puck.y;}
-    else{
-      const pos=puckInDZ(p.team)?getDZPos(p.role,p.team,puck.x,puck.y):
-                puckInOZ(p.team)?getOZPos(p.role,p.team,puck.x):
-                getNZPos(p.role,p.team);
-      tx=pos.x;ty=pos.y;
-    }
-  }else if(puckCarrier.team===p.team){
-    if(puckCarrier===p){
-      // I have the puck
-      const inOZ=puckInOZ(p.team);
-      const inNZ=!puckInOZ(p.team)&&!puckInDZ(p.team);
-      const inDZ=puckInDZ(p.team);
+  // Physical checks when close to carrier
+  if(carrier&&!hasPossession&&myD<AI_CFG.PRESSURE_RADIUS){
+    if(myD<CFG.POKE_R&&Math.random()<0.04*diff.AGGRESSION*1.5)aiPokeCheck(p,carrier);
+    if(myD<CFG.CHECK_R&&Math.random()<0.025*diff.AGGRESSION)aiBodyCheck(p,carrier);
+  }
 
-      // AI passing: look for open teammate before charging
-      if(p.aiShootCD<=0&&Math.random()<(inNZ?0.018:inDZ?0.025:0.006)){
-        const passed=aiTryPass(p);
-        if(passed){p.aiShootCD=1.5;return;}
-      }
+  const role=p.aiRole||'transition_shape';
 
-      if(isDefender){
-        // D-men: carry to blue line, then look to shoot from point
-        const ptY=isHome?RINK.BL_TOP+5:RINK.BL_BOT-5;
-        const goalDist=Math.abs(p.y-attackY);
-        if(goalDist<60&&inOZ&&p.aiShootCD<=0&&Math.random()<0.006){aiShoot(p);p.aiShootCD=3;}
-        // In own zone, move puck up; at blue line, hold and look to pass
-        tx=p.x;ty=inDZ?(isHome?p.y-2:p.y+2):ptY;
-      }else{
-        // Forwards
-        const goalDist=Math.abs(p.y-attackY);
-        if(goalDist<40&&inOZ&&p.aiShootCD<=0&&Math.random()<0.009){aiShoot(p);p.aiShootCD=2.5;}
-        if(inOZ){
-          // In OZ: drive to slot
-          const slotX=clamp(p.x,22,63);
-          const slotY=attackY+(isHome?28:-28);
-          tx=slotX;ty=slotY;
-        }else{
-          // In NZ or DZ: carry puck up ice toward OZ, don't sprint to slot yet
-          const nzPos=getNZPos(p.role,p.team);
-          tx=nzPos.x;ty=nzPos.y+(isHome?-8:8); // slightly forward of NZ default
-        }
-      }
+  if(!carrier){
+    // ── LOOSE PUCK ──────────────────────────────────────────────────────────
+    const puckD=dist(p.x,p.y,G.puck.x,G.puck.y);
+    if(role==='chase_puck'){
+      tx=G.puck.x;ty=G.puck.y;
+    }else if(role==='support_puck'){
+      // Don't pile on — get open nearby
+      const offset=p.x<42.5?12:-12;
+      tx=clamp(G.puck.x+offset,5,80);ty=clamp(G.puck.y+(isHome?6:-6),5,RINK.H-5);
     }else{
-      // Teammate has puck — spread into position based on zone
-      const pos=puckInOZ(p.team)?getOZPos(p.role,p.team,puckX):
-                puckInDZ(p.team)?getNZPos(p.role,p.team):
-                getNZPos(p.role,p.team);
-      tx=pos.x;ty=pos.y;
+      // Transition shape
+      const pos=getNZShapePos(p.role,p.team);tx=pos.x;ty=pos.y;
+    }
+  }else if(hasPossession){
+    // ── TEAM HAS PUCK ────────────────────────────────────────────────────────
+    if(puckInDZ(p.team)){
+      // Breakout formation
+      const pos=getBreakoutPos(role,p.team,carrierX,carrierY);tx=pos.x;ty=pos.y;
+    }else if(puckInOZ(p.team)){
+      // Offensive zone — spread, triangle support, net-front, point
+      const pos=getOZSupportPos(role,p.team,carrierX,carrierY);tx=pos.x;ty=pos.y;
+    }else{
+      // Neutral zone — maintain rush width or NZ shape
+      if(hs.rushTeam===p.team){
+        // Rush: wings sprint ahead on their side
+        if(role==='strong_support'||role==='weak_support'){
+          const side=(role==='strong_support')===(p.x<42.5)?-1:1;
+          tx=42.5+side*26;ty=carrierY+(isHome?-6:6);
+        }else{const pos=getNZShapePos(p.role,p.team);tx=pos.x;ty=pos.y;}
+      }else{
+        const pos=getNZShapePos(p.role,p.team);tx=pos.x;ty=pos.y;
+      }
     }
   }else{
-    // Enemy has puck — defend based on zone
-    const d=dist(p.x,p.y,puckCarrier.x,puckCarrier.y);
-    // Pressure / check only when close
-    if(d<CFG.POKE_R&&Math.random()<0.04)aiPokeCheck(p,puckCarrier);
-    if(d<CFG.CHECK_R&&Math.random()<0.025)aiBodyCheck(p,puckCarrier);
-
+    // ── DEFENDING ───────────────────────────────────────────────────────────
     if(puckInDZ(p.team)){
-      // Puck in our zone — defend tight
-      const pos=getDZPos(p.role,p.team,puckX,puckY);
-      tx=pos.x;ty=pos.y;
+      // Puck in our zone — defend based on role
+      const pos=getDZCoveragePos(role,p.team,carrierX,carrierY);tx=pos.x;ty=pos.y;
     }else if(puckInOZ(p.team)){
-      // Puck in enemy zone but they have it — backcheck hard
-      const nz=getNZPos(p.role,p.team);
-      tx=nz.x;ty=nz.y;
+      // Enemy has puck in our OZ but it's their DZ... shouldn't happen but backcheck
+      const pos=getNZShapePos(p.role,p.team);tx=pos.x;ty=pos.y;
     }else{
-      // Neutral zone — back pressure, stay between puck and own goal
-      const nz=getNZPos(p.role,p.team);
-      tx=nz.x;ty=nz.y;
+      // NZ or enemy OZ — backcheck hard through middle, maintain defensive shape
+      if(role==='puck_pressure'||role==='contain'){
+        // Chase carrier, angle through middle
+        tx=clamp(carrierX,20,65);ty=carrierY;
+      }else if(role==='slot_cover'){
+        // Stay in defensive lane, middle of ice
+        const defY=getDefendY(p.team);
+        tx=42.5;ty=clamp(carrierY+(isHome?8:-8),isHome?defY-55:RINK.H-defY-55+defY,isHome?defY:RINK.H-defY);
+      }else{
+        const pos=getNZShapePos(p.role,p.team);tx=pos.x;ty=pos.y;
+      }
     }
   }
 
-  // Move toward target with smooth steering
+  // Apply teammate spacing to avoid clustering
+  const spaced=applySpacing(p,tx,ty);
+  steerAI(p,spaced.x,spaced.y,CFG.AI_SPD*spdMult);
+}
+
+// ─── MOVEMENT HELPERS ────────────────────────────────────────────────────────
+function steerAI(p,tx,ty,maxSpd){
   const tdx=tx-p.x,tdy=ty-p.y;
   const td=Math.sqrt(tdx*tdx+tdy*tdy);
-  if(td>0.8){
-    const ns=Math.min(CFG.AI_SPD,td);
-    p.vx+=(tdx/td*ns-p.vx)*0.28;
-    p.vy+=(tdy/td*ns-p.vy)*0.28;
-  }else{p.vx*=0.7;p.vy*=0.7;}
+  if(td>0.5){
+    const ns=Math.min(maxSpd,td*0.35+maxSpd*0.65); // smooth deceleration near target
+    const accel=td>8?0.32:0.22; // faster acceleration when far
+    p.vx+=(tdx/td*ns-p.vx)*accel;
+    p.vy+=(tdy/td*ns-p.vy)*accel;
+  }else{
+    p.vx*=0.75;p.vy*=0.75; // gentle stop at destination
+  }
 }
+
+function applySpacing(p,tx,ty){
+  // Push target away from nearby teammates to prevent clustering
+  let ox=0,oy=0;
+  G.players.forEach(t=>{
+    if(t===p||t.team!==p.team||t.isGoalie)return;
+    const d=dist(t.x,t.y,tx,ty);
+    if(d<AI_CFG.SPACING_MIN&&d>0.1){
+      const push=(AI_CFG.SPACING_MIN-d)/AI_CFG.SPACING_MIN;
+      const ang=Math.atan2(ty-t.y,tx-t.x);
+      ox+=Math.cos(ang)*push*8;
+      oy+=Math.sin(ang)*push*8;
+    }
+  });
+  return{x:clamp(tx+ox,4,RINK.W-4),y:clamp(ty+oy,4,RINK.H-4)};
+}
+
+// Legacy stubs (used by goalie AI and a few references)
+function getDefaultPos(role,team){return getNZShapePos(role,team);}
+function getNZPos(role,team){return getNZShapePos(role,team);}
 
 function updateGoalieAI(goalie,dt){
   const puck=G.puck;
@@ -2201,6 +2470,10 @@ function onTouchStart(e){
       G.joyActive=true;G.joyTid=t.identifier;
       G.joyCX=x;G.joyCY=y;G.joyDX=0;G.joyDY=0;
       G.activeTouches[t.identifier]='joy';
+    }else if(y<52&&x>L.W-44){
+      // Tap top-right corner of HUD to toggle AI debug overlay
+      G.aiDebug=!G.aiDebug;
+      G.activeTouches[t.identifier]='debug';
     }else{
       const btn=hitTestButtons(x,y);
       if(btn){
