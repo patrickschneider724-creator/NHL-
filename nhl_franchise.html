@@ -1338,66 +1338,114 @@ function drawRink(ctx,L){
   ctx.restore();
 }
 
+function drawPlayerSprite(ctx,p,px,py,pr,isControlled){
+  const spd=Math.sqrt(p.vx*p.vx+p.vy*p.vy);
+  // Rotation: local -Y axis points in velocity direction
+  // formula: atan2(vx, -vy)
+  const angle=spd>0.12?Math.atan2(p.vx,-p.vy):(p.team==='home'?0:Math.PI);
+  const jColor=p.stunTimer>0?'#666':p.color;
+  const bodyW=pr*1.15,bodyH=pr*1.35;
+  const headR=pr*0.52,headY=-(bodyH*0.5+headR*0.55);
+
+  // Gold puck-possession glow (world space, drawn first so it's under sprite)
+  if(p.hasPuck){
+    ctx.fillStyle='rgba(255,200,0,0.22)';
+    ctx.beginPath();ctx.arc(px,py,pr*2.2,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(px,py,pr*2.2,0,Math.PI*2);ctx.stroke();
+  }
+
+  ctx.save();
+  ctx.translate(px,py);
+
+  // Ground shadow
+  ctx.fillStyle='rgba(0,0,0,0.18)';
+  ctx.beginPath();ctx.ellipse(0,pr*0.6,pr*0.85,pr*0.28,0,0,Math.PI*2);ctx.fill();
+
+  ctx.rotate(angle);
+
+  // Hockey stick (extends forward-right of body)
+  if(!p.isGoalie){
+    ctx.strokeStyle='#6b3a1f';ctx.lineWidth=Math.max(1.5,pr*0.2);ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(bodyW*0.48,-bodyH*0.15);
+    ctx.lineTo(bodyW*0.52,bodyH*0.75);
+    ctx.lineTo(bodyW*1.05,bodyH*1.05);
+    ctx.stroke();
+    // Blade highlight
+    ctx.strokeStyle='rgba(255,255,255,0.25)';ctx.lineWidth=Math.max(1,pr*0.12);
+    ctx.beginPath();ctx.moveTo(bodyW*0.78,bodyH*0.95);ctx.lineTo(bodyW*1.05,bodyH*1.05);ctx.stroke();
+  }
+
+  // Jersey body
+  ctx.fillStyle=jColor;
+  roundRect(ctx,-bodyW/2,-bodyH/2,bodyW,bodyH,pr*0.28);ctx.fill();
+  // Away team white outline
+  if(p.team==='away'){ctx.strokeStyle='rgba(255,255,255,0.8)';ctx.lineWidth=Math.max(1,pr*0.18);ctx.stroke();}
+  // Jersey shoulder stripes
+  ctx.fillStyle='rgba(255,255,255,0.15)';
+  ctx.fillRect(-bodyW/2,-bodyH/2,bodyW,pr*0.28);
+
+  // Jersey number
+  ctx.fillStyle='#fff';ctx.font=`bold ${Math.max(6,Math.round(pr*0.62))}px Arial`;
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText(p.num,0,bodyH*0.05);
+
+  // Head (skin)
+  ctx.fillStyle='#f5c5a3';
+  ctx.beginPath();ctx.arc(0,headY,headR,0,Math.PI*2);ctx.fill();
+  // Helmet (team color, top half)
+  ctx.fillStyle=jColor;
+  ctx.beginPath();ctx.arc(0,headY,headR,Math.PI,0);ctx.fill();
+  // Helmet chin strap
+  ctx.strokeStyle='rgba(0,0,0,0.4)';ctx.lineWidth=Math.max(1,pr*0.1);
+  ctx.beginPath();ctx.arc(0,headY,headR,0,Math.PI);ctx.stroke();
+  // Visor glint
+  ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.lineWidth=Math.max(1,pr*0.13);
+  ctx.beginPath();ctx.arc(0,headY,headR*0.65,Math.PI*0.15,Math.PI*0.75);ctx.stroke();
+
+  // Goalie leg pads (wider white rects either side)
+  if(p.isGoalie){
+    ctx.fillStyle='rgba(255,255,255,0.9)';
+    ctx.fillRect(-bodyW*0.85,0,bodyW*0.3,bodyH*0.65);
+    ctx.fillRect(bodyW*0.55,0,bodyW*0.3,bodyH*0.65);
+    ctx.strokeStyle='rgba(200,200,200,0.6)';ctx.lineWidth=1;
+    ctx.strokeRect(-bodyW*0.85,0,bodyW*0.3,bodyH*0.65);
+    ctx.strokeRect(bodyW*0.55,0,bodyW*0.3,bodyH*0.65);
+  }
+
+  ctx.restore();
+
+  // Controlled player ring (world space)
+  if(isControlled){
+    ctx.strokeStyle='#fff';ctx.lineWidth=gs(0.8)+1;
+    ctx.beginPath();ctx.arc(px,py,pr+gs(1.0),0,Math.PI*2);ctx.stroke();
+  }
+
+  // Shoot charge ring (world space)
+  if(isControlled&&G.shootCharging&&G.shootCharge>0){
+    const pct=Math.min(G.shootCharge/CFG.SLAP_THRESHOLD,1);
+    ctx.strokeStyle=pct>=1?'#ff2222':'#ffaa00';ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(px,py,pr+gs(1.8),-Math.PI/2,-Math.PI/2+Math.PI*2*pct);ctx.stroke();
+  }
+
+  // Stun stars (world space)
+  if(p.stunTimer>0){
+    for(let i=0;i<3;i++){
+      const sa=(Date.now()/200)+i*(Math.PI*2/3);
+      const sx=px+Math.cos(sa)*pr*1.8,sy=py+Math.sin(sa)*pr*1.8-gs(0.5);
+      ctx.fillStyle='#ff0';ctx.font=`${gs(1.5)}px Arial`;
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('*',sx,sy);
+    }
+  }
+}
+
 function drawPlayers(ctx,L){
   G.players.forEach(p=>{
     const px=gx(p.x),py=gy(p.y);
-    const pr=gs(RINK.P_R||2.5);
-    const isControlled=p===G.controlled;
-
-    // Shadow
-    ctx.fillStyle='rgba(0,0,0,0.15)';
-    ctx.beginPath();ctx.ellipse(px,py+pr*0.5,pr*0.9,pr*0.4,0,0,Math.PI*2);ctx.fill();
-
-    // Player circle
-    ctx.beginPath();ctx.arc(px,py,pr,0,Math.PI*2);
-    ctx.fillStyle=p.stunTimer>0?'#888':p.color;ctx.fill();
-
-    // Away team outline
-    if(p.team==='away'){
-      ctx.strokeStyle='rgba(255,255,255,0.7)';ctx.lineWidth=gs(0.6);ctx.stroke();
-    }
-
-    // Controlled player ring
-    if(isControlled){
-      ctx.strokeStyle='#fff';ctx.lineWidth=gs(0.8)+1;
-      ctx.beginPath();ctx.arc(px,py,pr+gs(0.7),0,Math.PI*2);ctx.stroke();
-    }
-
-    // Goalie indicator
-    if(p.isGoalie){
-      ctx.strokeStyle='rgba(255,255,255,0.9)';ctx.lineWidth=gs(0.8);
-      ctx.beginPath();ctx.rect(px-pr*0.7,py-pr*0.7,pr*1.4,pr*1.4);ctx.stroke();
-    }
-
-    // Puck possession indicator — gold glow under puck carrier
-    if(p.hasPuck){
-      ctx.fillStyle='rgba(255,200,0,0.28)';
-      ctx.beginPath();ctx.arc(px,py,pr*1.9,0,Math.PI*2);ctx.fill();
-      ctx.strokeStyle='#ffd700';ctx.lineWidth=2;
-      ctx.beginPath();ctx.arc(px,py,pr*1.9,0,Math.PI*2);ctx.stroke();
-    }
-    // Shoot charge ring
-    if(isControlled&&G.shootCharging&&G.shootCharge>0){
-      const pct=Math.min(G.shootCharge/CFG.SLAP_THRESHOLD,1);
-      ctx.strokeStyle=pct>=1?'#ff2222':'#ffaa00';ctx.lineWidth=3;
-      ctx.beginPath();ctx.arc(px,py,pr+gs(1.5),-Math.PI/2,-Math.PI/2+Math.PI*2*pct);ctx.stroke();
-    }
-
-    // Jersey number
-    ctx.fillStyle='#fff';
-    ctx.font=`bold ${Math.max(8,pr*0.9)}px Arial`;
-    ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.fillText(p.num,px,py);
-
-    // Stun stars
-    if(p.stunTimer>0){
-      for(let i=0;i<3;i++){
-        const angle=(Date.now()/200)+i*(Math.PI*2/3);
-        const sx=px+Math.cos(angle)*pr*1.4,sy=py+Math.sin(angle)*pr*1.4-gs(0.5);
-        ctx.fillStyle='#ff0';ctx.font=`${gs(1.5)}px Arial`;
-        ctx.fillText('*',sx,sy);
-      }
-    }
+    const pr=gs(CFG.P_R);
+    drawPlayerSprite(ctx,p,px,py,pr,p===G.controlled);
   });
 }
 
