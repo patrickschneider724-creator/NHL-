@@ -90,7 +90,7 @@ text-shadow:0 0 40px #ff0,0 0 80px #f90;text-align:center;line-height:1.2;}
 const RINK={W:85,H:200,GL_TOP:11,GL_BOT:189,GOAL_W:6,GOAL_D:4,BL_TOP:75,BL_BOT:125,CTR:100,CR_R:7,CR_D:5};
 const CFG={CAP:88000000,PERIOD_SECS:1200,GAME_SPEED:6.5,PERIODS:3,SEASON_GAMES:82,DRAFT_ROUNDS:7,
 P_R:2.5,PUCK_R:0.5,MAX_SPD:3.5,FRICTION:0.92,PUCK_FRIC:0.988,
-WRIST_SPD:14,SLAP_SPD:20,PASS_SPD:11,AI_SPD:1.5,GOALIE_SPD:1.1,
+WRIST_SPD:14,SLAP_SPD:20,PASS_SPD:11,AI_SPD:1.5,GOALIE_SPD:1.6,
 PICKUP_R:5.0,CHECK_R:5,POKE_R:5,SLAP_THRESHOLD:0.25,INPUT_BUFFER:0.12};
 
 // ===================== 32 NHL TEAMS =====================
@@ -1128,7 +1128,7 @@ function gs(s){return s*G.layout.rink.scale;}
 function mkGamePlayer(team,role,x,y,name,num,ovr,spd,sht,pas,def,gol,color){
   return{team,role,isGoalie:role==='G',isPlayer:false,
     x,y,vx:0,vy:0,name,num,ovr,spd,sht,pas,def,gol:gol||75,color,
-    hasPuck:false,stunTimer:0,aiState:'idle',aiTarget:{x,y},startX:x,startY:y};
+    hasPuck:false,stunTimer:0,aiShootCD:0,aiState:'idle',aiTarget:{x,y},startX:x,startY:y};
 }
 
 function startGameplay(){
@@ -1735,6 +1735,7 @@ function getDefaultPos(role,team){
 function updateAllAI(dt){
   G.players.forEach(p=>{
     if(p===G.controlled||p.stunTimer>0)return;
+    if(p.aiShootCD>0)p.aiShootCD-=dt;
     if(p.isGoalie)updateGoalieAI(p,dt);
     else updateSkaterAI(p,dt);
   });
@@ -1761,7 +1762,7 @@ function updateSkaterAI(p,dt){
       // I have the puck - attack!
       const goalX=42.5+(Math.random()-0.5)*12;
       const goalDist=Math.abs(p.y-attackY);
-      if(goalDist<45&&Math.random()<0.025){aiShoot(p);}
+      if(goalDist<38&&p.aiShootCD<=0&&Math.random()<0.007){aiShoot(p);p.aiShootCD=2.5;}
       tx=goalX;ty=attackY+(p.team==='home'?25:-25);
     }else{
       // Support - move to open position
@@ -1814,20 +1815,21 @@ function updateGoalieAI(goalie,dt){
 
   // Save attempt - check if fast puck heading toward goal
   const puckSpd=Math.sqrt(puck.vx**2+puck.vy**2);
-  const puckHeadingAtGoal=isTopGoalie?(puck.vy<-3):(puck.vy>3);
-  if(!puck.carrier&&puckSpd>5&&puckHeadingAtGoal){
+  const puckHeadingAtGoal=isTopGoalie?(puck.vy<-2):(puck.vy>2);
+  if(!puck.carrier&&puckSpd>3&&puckHeadingAtGoal){
     const d=dist(goalie.x,goalie.y,puck.x,puck.y);
-    if(d<10){
-      const angleOff=Math.abs(puck.x-42.5)/42.5;
-      const goalieRating=(goalie.gol||80)/100;
-      const spdFactor=Math.max(0.55,1-(puckSpd-8)/30);
-      const angFactor=0.7+angleOff*0.3;
-      const posAdj=Math.max(0.5,1-Math.abs(goalie.x-puck.x)/8);
-      const saveProb=goalieRating*spdFactor*angFactor*posAdj;
+    if(d<16){
+      // Base save rate scaled by goalie rating (70-rated ~85%, 90-rated ~94%)
+      const baseSave=0.72+(goalie.gol||80)/100*0.22;
+      // Speed penalty: very fast shots are harder to stop (max -12%)
+      const spdPenalty=Math.min(0.12,(puckSpd-8)/60);
+      // Position penalty: goalie off-centre gives up more (max -15%)
+      const posPenalty=Math.min(0.15,Math.abs(goalie.x-puck.x)/30);
+      const saveProb=Math.max(0.3,baseSave-spdPenalty-posPenalty);
       if(Math.random()<saveProb){
-        // Save! Deflect puck
-        puck.vx=(Math.random()-0.5)*5;
-        puck.vy=(isTopGoalie?1:-1)*3;
+        // Save! Deflect puck to the side
+        puck.vx=(Math.random()-0.5)*6;
+        puck.vy=(isTopGoalie?1:-1)*(2+Math.random()*2);
         puck.carrier=null;
       }
     }
