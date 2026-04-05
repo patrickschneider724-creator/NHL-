@@ -89,8 +89,8 @@ text-shadow:0 0 40px #ff0,0 0 80px #f90;text-align:center;line-height:1.2;}
 // ===================== CONSTANTS =====================
 const RINK={W:85,H:200,GL_TOP:11,GL_BOT:189,GOAL_W:6,GOAL_D:4,BL_TOP:75,BL_BOT:125,CTR:100,CR_R:7,CR_D:5};
 const CFG={CAP:88000000,PERIOD_SECS:1200,GAME_SPEED:6.5,PERIODS:3,SEASON_GAMES:82,DRAFT_ROUNDS:7,
-P_R:2.5,PUCK_R:0.5,MAX_SPD:4.5,FRICTION:0.82,PUCK_FRIC:0.988,
-WRIST_SPD:16,SLAP_SPD:24,PASS_SPD:13,AI_SPD:3.2,GOALIE_SPD:2.8,
+P_R:2.5,PUCK_R:0.5,MAX_SPD:2.0,FRICTION:0.88,PUCK_FRIC:0.988,
+WRIST_SPD:14,SLAP_SPD:20,PASS_SPD:11,AI_SPD:1.5,GOALIE_SPD:1.1,
 PICKUP_R:3.5,CHECK_R:5,POKE_R:5};
 
 // ===================== 32 NHL TEAMS =====================
@@ -1091,10 +1091,13 @@ const G={
 function computeLayout(){
   const W=canvas.width,H=canvas.height;
   const ctrlH=Math.min(225,H*0.28);
+  const hudH=52; // scoreboard height - rink must start below this
   const gameH=H-ctrlH;
-  const scale=Math.min(W/RINK.W,gameH/RINK.H)*0.95;
+  const availH=gameH-hudH; // usable vertical space for rink
+  const scale=Math.min(W/RINK.W,availH/RINK.H); // fill available space fully
   const rw=RINK.W*scale,rh=RINK.H*scale;
-  const rx=(W-rw)/2,ry=(gameH-rh)/2;
+  const rx=(W-rw)/2;
+  const ry=hudH+(availH-rh)/2; // offset below HUD, centered in remaining space
   const jR=Math.min(55,ctrlH*0.42);
   const jX=W*0.18,jY=H-ctrlH*0.5;
   const bW=Math.min(78,W*0.19);
