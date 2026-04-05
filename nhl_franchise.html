@@ -1279,18 +1279,18 @@ function drawRink(ctx,L){
   ctx.lineTo(rx+cr,ry+rh);ctx.arcTo(rx,ry+rh,rx,ry+rh-cr,cr);
   ctx.lineTo(rx,ry+cr);ctx.arcTo(rx,ry,rx+cr,ry,cr);
   ctx.closePath();
-  ctx.fillStyle='#d8eef7';ctx.fill();
-  ctx.strokeStyle='#1a2035';ctx.lineWidth=3;ctx.stroke();
+  ctx.fillStyle='#eef6fb';ctx.fill();
+  ctx.strokeStyle='#b0c8d8';ctx.lineWidth=2;ctx.stroke();
   ctx.clip();
 
   // Goalie creases
   const glx=gx(RINK.W/2),gcr=gs(RINK.CR_R),gcd=gs(RINK.CR_D);
   // Top crease (away goal)
-  ctx.fillStyle='rgba(173,216,230,0.5)';
+  ctx.fillStyle='rgba(173,216,240,0.35)';
   ctx.beginPath();ctx.ellipse(glx,gy(RINK.GL_TOP),gcr,gcd,0,0,Math.PI,false);ctx.fill();
   ctx.strokeStyle='#c00';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(glx,gy(RINK.GL_TOP),gcr,gcd,0,0,Math.PI,false);ctx.stroke();
   // Bottom crease (home goal)
-  ctx.fillStyle='rgba(173,216,230,0.5)';
+  ctx.fillStyle='rgba(173,216,240,0.35)';
   ctx.beginPath();ctx.ellipse(glx,gy(RINK.GL_BOT),gcr,gcd,0,Math.PI,2*Math.PI,false);ctx.fill();
   ctx.strokeStyle='#c00';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(glx,gy(RINK.GL_BOT),gcr,gcd,0,Math.PI,2*Math.PI,false);ctx.stroke();
 
@@ -1326,14 +1326,28 @@ function drawRink(ctx,L){
   ctx.beginPath();ctx.moveTo(rx,gy(RINK.GL_TOP));ctx.lineTo(rx+rw,gy(RINK.GL_TOP));ctx.stroke();
   ctx.beginPath();ctx.moveTo(rx,gy(RINK.GL_BOT));ctx.lineTo(rx+rw,gy(RINK.GL_BOT));ctx.stroke();
 
-  // Goals (nets)
+  // Goals (nets) — red posts, light netting fill
   const goalLX=gx((RINK.W-RINK.GOAL_W)/2),goalRX=gx((RINK.W+RINK.GOAL_W)/2);
   const gnetD=gs(RINK.GOAL_D);
-  ctx.strokeStyle='#888';ctx.lineWidth=gs(1.2);
-  // Top goal
+  // Net fill
+  ctx.fillStyle='rgba(220,230,235,0.7)';
+  ctx.fillRect(goalLX,gy(RINK.GL_TOP)-gnetD,goalRX-goalLX,gnetD);
+  ctx.fillRect(goalLX,gy(RINK.GL_BOT),goalRX-goalLX,gnetD);
+  // Red post frame
+  ctx.strokeStyle='#cc2200';ctx.lineWidth=Math.max(2,gs(0.9));
   ctx.strokeRect(goalLX,gy(RINK.GL_TOP)-gnetD,goalRX-goalLX,gnetD);
-  // Bottom goal
   ctx.strokeRect(goalLX,gy(RINK.GL_BOT),goalRX-goalLX,gnetD);
+  // Net crosshatch lines
+  ctx.strokeStyle='rgba(150,160,165,0.5)';ctx.lineWidth=0.5;
+  const nw=goalRX-goalLX,cols=4;
+  for(let i=1;i<cols;i++){
+    const nx=goalLX+nw*i/cols;
+    ctx.beginPath();ctx.moveTo(nx,gy(RINK.GL_TOP)-gnetD);ctx.lineTo(nx,gy(RINK.GL_TOP));ctx.stroke();
+    ctx.beginPath();ctx.moveTo(nx,gy(RINK.GL_BOT));ctx.lineTo(nx,gy(RINK.GL_BOT)+gnetD);ctx.stroke();
+  }
+  // Horizontal net line (mid-depth)
+  ctx.beginPath();ctx.moveTo(goalLX,gy(RINK.GL_TOP)-gnetD*0.5);ctx.lineTo(goalRX,gy(RINK.GL_TOP)-gnetD*0.5);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(goalLX,gy(RINK.GL_BOT)+gnetD*0.5);ctx.lineTo(goalRX,gy(RINK.GL_BOT)+gnetD*0.5);ctx.stroke();
 
   ctx.restore();
 }
@@ -1344,8 +1358,8 @@ function drawPlayerSprite(ctx,p,px,py,pr,isControlled){
   // formula: atan2(vx, -vy)
   const angle=spd>0.12?Math.atan2(p.vx,-p.vy):(p.team==='home'?0:Math.PI);
   const jColor=p.stunTimer>0?'#666':p.color;
-  const bodyW=pr*1.15,bodyH=pr*1.35;
-  const headR=pr*0.52,headY=-(bodyH*0.5+headR*0.55);
+  const bodyW=pr*1.3,bodyH=pr*1.5;
+  const headR=pr*0.55,headY=-(bodyH*0.5+headR*0.5);
 
   // Gold puck-possession glow (world space, drawn first so it's under sprite)
   if(p.hasPuck){
@@ -1416,10 +1430,28 @@ function drawPlayerSprite(ctx,p,px,py,pr,isControlled){
 
   ctx.restore();
 
-  // Controlled player ring (world space)
+  // Controlled player — glowing cyan ring (like NHL 26)
   if(isControlled){
-    ctx.strokeStyle='#fff';ctx.lineWidth=gs(0.8)+1;
-    ctx.beginPath();ctx.arc(px,py,pr+gs(1.0),0,Math.PI*2);ctx.stroke();
+    const ringR=pr+gs(1.2);
+    // Outer glow
+    ctx.strokeStyle='rgba(0,255,200,0.25)';ctx.lineWidth=gs(1.5)+4;
+    ctx.beginPath();ctx.arc(px,py,ringR,0,Math.PI*2);ctx.stroke();
+    // Inner solid ring
+    ctx.strokeStyle='#00e8c0';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(px,py,ringR,0,Math.PI*2);ctx.stroke();
+  }
+
+  // Player last name label below sprite
+  const lastName=p.name?p.name.split(' ').pop():'';
+  if(lastName){
+    const ly=py+pr+gs(2.2);
+    ctx.font=`bold ${Math.max(8,Math.round(pr*0.55))}px -apple-system,Arial`;
+    ctx.textAlign='center';ctx.textBaseline='top';
+    // Dark shadow for readability on light ice
+    ctx.fillStyle='rgba(0,0,0,0.55)';
+    ctx.fillText(lastName,px+1,ly+1);
+    ctx.fillStyle='#111';
+    ctx.fillText(lastName,px,ly);
   }
 
   // Shoot charge ring (world space)
@@ -1631,7 +1663,12 @@ function render(){
   if(!L)return;
   ctx2.clearRect(0,0,L.W,L.H);
   // Background
-  ctx2.fillStyle='#080c18';ctx2.fillRect(0,0,L.W,L.H);
+  ctx2.fillStyle='#0a0e1a';ctx2.fillRect(0,0,L.W,L.H);
+  // Arena boards surround
+  const rk=L.rink;
+  const brd=6;
+  ctx2.fillStyle='#1a2a1a';
+  ctx2.fillRect(rk.x-brd,rk.y-brd,rk.w+brd*2,rk.h+brd*2);
   // Screen shake
   const sk=G.screenShake;
   if(sk.timer>0){ctx2.save();ctx2.translate(sk.x,sk.y);}
