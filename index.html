@@ -1,12 +1,50 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NHL Repository Page</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+<title>NHL Franchise Hockey</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;background:#080c18;color:#fff;
+font-family:-apple-system,'Helvetica Neue',Arial,sans-serif;
+display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.container{text-align:center;padding:40px 32px;max-width:400px;width:100%;}
+.logo{font-size:72px;font-weight:900;letter-spacing:-2px;
+background:linear-gradient(135deg,#fff 0%,#4a9eff 100%);
+-webkit-background-clip:text;-webkit-text-fill-color:transparent;
+background-clip:text;line-height:1;}
+.sub{font-size:22px;font-weight:700;color:#4a9eff;letter-spacing:3px;margin-top:6px;}
+.tagline{font-size:14px;color:#6b7280;margin-top:12px;line-height:1.5;}
+.features{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:32px 0;text-align:left;}
+.feat{background:#0d1424;border:1px solid #1e2a3a;border-radius:10px;padding:12px;}
+.feat .icon{font-size:22px;margin-bottom:4px;}
+.feat .ftitle{font-size:13px;font-weight:700;color:#fff;}
+.feat .fdesc{font-size:11px;color:#6b7280;margin-top:2px;}
+.play-btn{display:block;width:100%;padding:20px;border-radius:16px;
+background:linear-gradient(135deg,#2563eb,#1d4ed8);border:none;color:#fff;
+font-size:20px;font-weight:900;letter-spacing:1px;cursor:pointer;
+text-decoration:none;box-shadow:0 8px 32px rgba(37,99,235,0.4);}
+.play-btn:active{opacity:0.85;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.6}}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;
+background:#4ade80;margin-right:8px;animation:pulse 1.5s infinite;}
+.footer{font-size:11px;color:#374151;margin-top:20px;}
+</style>
 </head>
 <body>
-    <h1>Welcome to the NHL Repository</h1>
-    <p>This is the GitHub Pages site for the NHL repository.</p>
+<div class="container">
+  <div class="logo">NHL</div>
+  <div class="sub">FRANCHISE</div>
+  <p class="tagline">Full franchise mode hockey simulation.<br>Optimized for iPhone.</p>
+  <div class="features">
+    <div class="feat"><div class="icon">🏒</div><div class="ftitle">5v5 Gameplay</div><div class="fdesc">Touch controls, AI, goalie saves</div></div>
+    <div class="feat"><div class="icon">🏆</div><div class="ftitle">Franchise Mode</div><div class="fdesc">82 games, playoffs, draft</div></div>
+    <div class="feat"><div class="icon">👥</div><div class="ftitle">All 32 Teams</div><div class="fdesc">Real players & team colors</div></div>
+    <div class="feat"><div class="icon">💰</div><div class="ftitle">Salary Cap</div><div class="fdesc">Trades, FA, $88M cap</div></div>
+  </div>
+  <a href="nhl_franchise.html" class="play-btn"><span class="dot"></span>PLAY NOW</a>
+  <p class="footer">All 32 NHL Teams &bull; Multi-Season &bull; Auto-Save</p>
+</div>
 </body>
 </html>
