@@ -89,9 +89,9 @@ text-shadow:0 0 40px #ff0,0 0 80px #f90;text-align:center;line-height:1.2;}
 // ===================== CONSTANTS =====================
 const RINK={W:85,H:200,GL_TOP:11,GL_BOT:189,GOAL_W:6,GOAL_D:4,BL_TOP:75,BL_BOT:125,CTR:100,CR_R:7,CR_D:5};
 const CFG={CAP:88000000,PERIOD_SECS:1200,GAME_SPEED:6.5,PERIODS:3,SEASON_GAMES:82,DRAFT_ROUNDS:7,
-P_R:2.5,PUCK_R:0.5,MAX_SPD:4.5,FRICTION:0.82,PUCK_FRIC:0.988,
-WRIST_SPD:16,SLAP_SPD:24,PASS_SPD:13,AI_SPD:3.2,GOALIE_SPD:2.8,
-PICKUP_R:3.5,CHECK_R:5,POKE_R:5};
+P_R:2.5,PUCK_R:0.5,MAX_SPD:3.5,FRICTION:0.92,PUCK_FRIC:0.988,
+WRIST_SPD:14,SLAP_SPD:20,PASS_SPD:11,AI_SPD:1.5,GOALIE_SPD:1.1,
+PICKUP_R:5.0,CHECK_R:5,POKE_R:5,SLAP_THRESHOLD:0.25,INPUT_BUFFER:0.12};
 
 // ===================== 32 NHL TEAMS =====================
 const TEAMS=[
@@ -1081,8 +1081,9 @@ const G={
   players:[],puck:null,controlled:null,
   lastTime:0,layout:null,
   joyActive:false,joyTid:-1,joyCX:0,joyCY:0,joyDX:0,joyDY:0,
-  btnState:{pass:false,shoot:false,slap:false,check:false,poke:false},
-  slapCharging:false,slapCharge:0,slapTid:-1,
+  btnState:{shoot:false,pass:false,check:false},
+  shootPressTime:0,shootCharging:false,shootCharge:0,
+  bufferedShotUntil:0,puckTrail:[],screenShake:{x:0,y:0,timer:0},
   stateTimer:0,goalTeam:'',goalFlash:false,
   activeTouches:{},lastGoalCheck:0,
   ot:false,shootout:false,
@@ -1091,28 +1092,31 @@ const G={
 function computeLayout(){
   const W=canvas.width,H=canvas.height;
   const ctrlH=Math.min(225,H*0.28);
+  const hudH=52;
   const gameH=H-ctrlH;
-  const scale=Math.min(W/RINK.W,gameH/RINK.H)*0.95;
+  const availH=gameH-hudH;
+  const scale=Math.min(W/RINK.W,availH/RINK.H);
   const rw=RINK.W*scale,rh=RINK.H*scale;
-  const rx=(W-rw)/2,ry=(gameH-rh)/2;
+  const rx=(W-rw)/2;
+  const ry=hudH+(availH-rh)/2;
   const jR=Math.min(55,ctrlH*0.42);
   const jX=W*0.18,jY=H-ctrlH*0.5;
-  const bW=Math.min(78,W*0.19);
-  const bH=Math.min(52,ctrlH*0.37);
-  const bGap=Math.min(10,W*0.025);
-  const bsX=W*0.50;
-  const br1=H-ctrlH+ctrlH*0.12;
-  const br2=H-ctrlH+ctrlH*0.49;
-  const br3=H-ctrlH+ctrlH*0.77;
+  // 3-button layout: SHOOT (large, bottom-right), PASS/CHECK (above-left of SHOOT)
+  const shootW=Math.min(110,W*0.26),shootH=Math.min(54,ctrlH*0.42);
+  const shootX=W-shootW/2-W*0.05,shootY=H-shootH/2-ctrlH*0.14;
+  const auxW=Math.min(90,W*0.21),auxH=Math.min(44,ctrlH*0.34);
+  const auxX=shootX-shootW/2-auxW/2-10,auxY=shootY-shootH/2+auxH/2;
+  // Face-off button (center)
+  const foR=Math.min(32,ctrlH*0.26);
+  const foX=W*0.50, foY=H-ctrlH*0.5;
   return{W,H,ctrlH,gameH,
     rink:{x:rx,y:ry,w:rw,h:rh,scale:scale},
     joy:{x:jX,y:jY,r:jR,kr:jR*0.38},
+    faceoff:{x:foX,y:foY,r:foR},
     btns:{
-      pass:{x:bsX,y:br1,w:bW,h:bH,label:'PASS',color:'#2563eb'},
-      shoot:{x:bsX+bW+bGap,y:br1,w:bW,h:bH,label:'SHOOT',color:'#dc2626'},
-      slap:{x:bsX,y:br2,w:bW,h:bH,label:'SLAP',color:'#c2410c'},
-      check:{x:bsX+bW+bGap,y:br2,w:bW,h:bH,label:'CHECK',color:'#b45309'},
-      poke:{x:bsX+(bW+bGap)/2,y:br3,w:bW,h:bH,label:'POKE',color:'#16a34a'},
+      shoot:{x:shootX,y:shootY,w:shootW,h:shootH,label:'SHOOT',color:'#ff4444'},
+      pass: {x:auxX,  y:auxY,  w:auxW,  h:auxH,  label:'PASS',  color:'#4a9eff'},
+      check:{x:auxX,  y:auxY,  w:auxW,  h:auxH,  label:'CHECK', color:'#cc44cc'},
     }
   };
 }
@@ -1144,7 +1148,8 @@ function startGameplay(){
   G.stateTimer=2.5;G.players=[];G.activeTouches={};
   G.joyActive=false;G.joyDX=0;G.joyDY=0;
   Object.keys(G.btnState).forEach(k=>G.btnState[k]=false);
-  G.slapCharging=false;G.slapCharge=0;
+  G.shootCharging=false;G.shootCharge=0;G.shootPressTime=0;
+  G.bufferedShotUntil=0;G.puckTrail=[];G.screenShake={x:0,y:0,timer:0};
 
   function getRoster(team,td){
     const r=team.roster||[];
@@ -1206,7 +1211,7 @@ function faceOff(x,y){
   G.puck.x=x;G.puck.y=y;G.puck.vx=0;G.puck.vy=0;G.puck.carrier=null;
   G.players.forEach(p=>{p.hasPuck=false;p.x=p.startX;p.y=p.startY;p.vx=0;p.vy=0;});
   G.state='faceoff';G.stateTimer=2.5;
-  G.slapCharging=false;G.slapCharge=0;
+  G.shootCharging=false;G.shootCharge=0;G.puckTrail=[];
   updateControlled();
 }
 
@@ -1364,10 +1369,18 @@ function drawPlayers(ctx,L){
       ctx.beginPath();ctx.rect(px-pr*0.7,py-pr*0.7,pr*1.4,pr*1.4);ctx.stroke();
     }
 
-    // Puck possession indicator
+    // Puck possession indicator — gold glow under puck carrier
     if(p.hasPuck){
-      ctx.fillStyle='#ff0';
-      ctx.beginPath();ctx.arc(px,py-pr-gs(1.2),gs(1.2),0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='rgba(255,200,0,0.28)';
+      ctx.beginPath();ctx.arc(px,py,pr*1.9,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle='#ffd700';ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(px,py,pr*1.9,0,Math.PI*2);ctx.stroke();
+    }
+    // Shoot charge ring
+    if(isControlled&&G.shootCharging&&G.shootCharge>0){
+      const pct=Math.min(G.shootCharge/CFG.SLAP_THRESHOLD,1);
+      ctx.strokeStyle=pct>=1?'#ff2222':'#ffaa00';ctx.lineWidth=3;
+      ctx.beginPath();ctx.arc(px,py,pr+gs(1.5),-Math.PI/2,-Math.PI/2+Math.PI*2*pct);ctx.stroke();
     }
 
     // Jersey number
@@ -1390,6 +1403,15 @@ function drawPlayers(ctx,L){
 
 function drawPuck(ctx,L){
   const p=G.puck;
+  // Draw trail
+  const trail=G.puckTrail;
+  for(let i=0;i<trail.length;i++){
+    const alpha=(i/trail.length)*0.35;
+    ctx.globalAlpha=alpha;
+    ctx.fillStyle='#aaa';
+    ctx.beginPath();ctx.arc(gx(trail[i].x),gy(trail[i].y),Math.max(2,gs(0.35)),0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
   const px=gx(p.x),py=gy(p.y);
   const pr=gs(RINK.PUCK_R||0.5);
   ctx.fillStyle='#111';
@@ -1447,45 +1469,104 @@ function drawHUD(ctx,L){
   }
 }
 
+function roundRect(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r);ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+  ctx.lineTo(x+r,y+h);ctx.arcTo(x,y+h,x,y+h-r,r);
+  ctx.lineTo(x,y+r);ctx.arcTo(x,y,x+r,y,r);
+  ctx.closePath();
+}
+
 function drawControls(ctx,L){
-  const{W,H,ctrlH,btns,joy}=L;
+  const{W,H,ctrlH,btns,joy,faceoff}=L;
   // Control area background
-  ctx.fillStyle='rgba(5,8,20,0.9)';
+  ctx.fillStyle='rgba(5,8,20,0.92)';
   ctx.fillRect(0,H-ctrlH,W,ctrlH);
   ctx.fillStyle='rgba(255,255,255,0.08)';
   ctx.fillRect(0,H-ctrlH,W,1);
 
   // Joystick base
-  ctx.strokeStyle='rgba(255,255,255,0.2)';ctx.lineWidth=2;
+  ctx.strokeStyle='rgba(255,255,255,0.25)';ctx.lineWidth=2;
   ctx.beginPath();ctx.arc(joy.x,joy.y,joy.r,0,Math.PI*2);ctx.stroke();
-  // Crosshairs
   ctx.strokeStyle='rgba(255,255,255,0.1)';ctx.lineWidth=1;
   ctx.beginPath();ctx.moveTo(joy.x-joy.r,joy.y);ctx.lineTo(joy.x+joy.r,joy.y);ctx.stroke();
   ctx.beginPath();ctx.moveTo(joy.x,joy.y-joy.r);ctx.lineTo(joy.x,joy.y+joy.r);ctx.stroke();
-  // Joystick knob
   const kx=joy.x+G.joyDX*joy.r,ky=joy.y+G.joyDY*joy.r;
-  ctx.fillStyle='rgba(255,255,255,0.4)';
+  ctx.fillStyle='rgba(255,255,255,0.45)';
   ctx.beginPath();ctx.arc(kx,ky,joy.kr,0,Math.PI*2);ctx.fill();
 
-  // Buttons
-  Object.entries(btns).forEach(([name,b])=>{
-    const pressed=G.btnState[name]||(name==='slap'&&G.slapCharging);
-    const alpha=pressed?0.95:0.7;
-    // Button background
-    ctx.globalAlpha=alpha;
-    ctx.fillStyle=b.color;
-    roundRect(ctx,b.x,b.y,b.w,b.h,8);ctx.fill();
-    // Slap charge indicator
-    if(name==='slap'&&G.slapCharging){
-      ctx.fillStyle='rgba(255,255,255,0.3)';
-      roundRect(ctx,b.x,b.y,b.w*(G.slapCharge/0.5),b.h,8);ctx.fill();
+  // Determine if controlled player has puck
+  const hp=G.controlled&&G.controlled.hasPuck;
+
+  // Draw SHOOT button (always visible)
+  {
+    const b=btns.shoot;
+    const pressed=G.btnState.shoot;
+    const scale=pressed?0.9:1;
+    ctx.save();
+    ctx.translate(b.x,b.y);ctx.scale(scale,scale);ctx.translate(-b.x,-b.y);
+    ctx.globalAlpha=pressed?1:0.82;
+    // Charge fill background
+    if(G.shootCharging&&G.shootCharge>0){
+      const pct=Math.min(G.shootCharge/CFG.SLAP_THRESHOLD,1);
+      ctx.fillStyle=pct>=1?'#8b0000':'#3a0000';
+      roundRect(ctx,b.x-b.w/2,b.y-b.h/2,b.w,b.h,10);ctx.fill();
+      ctx.fillStyle=pct>=1?'#ff2222':'#ff7700';
+      roundRect(ctx,b.x-b.w/2,b.y-b.h/2,b.w*pct,b.h,10);ctx.fill();
+    }else{
+      ctx.fillStyle='rgba(120,0,0,0.88)';
+      roundRect(ctx,b.x-b.w/2,b.y-b.h/2,b.w,b.h,10);ctx.fill();
     }
+    ctx.strokeStyle=b.color;ctx.lineWidth=pressed?3:2;
+    roundRect(ctx,b.x-b.w/2,b.y-b.h/2,b.w,b.h,10);ctx.stroke();
     ctx.globalAlpha=1;
-    // Label
-    ctx.fillStyle='#fff';ctx.font=`bold 11px -apple-system,Arial`;
+    ctx.fillStyle='#fff';
+    ctx.font=`bold ${Math.round(b.h*0.42)}px -apple-system,Arial`;
     ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.fillText(b.label,b.x+b.w/2,b.y+b.h/2);
-  });
+    ctx.fillText(b.label,b.x,b.y);
+    if(G.shootCharging&&G.shootCharge>=CFG.SLAP_THRESHOLD){
+      ctx.fillStyle='#ff0';ctx.font=`bold ${Math.round(b.h*0.3)}px Arial`;
+      ctx.fillText('SLAP!',b.x,b.y+b.h/2+10);
+    }
+    ctx.restore();
+  }
+
+  // Draw PASS (hasPuck) or CHECK (!hasPuck) — context-sensitive
+  {
+    const b=hp?btns.pass:btns.check;
+    const name=hp?'pass':'check';
+    const pressed=G.btnState[name];
+    const scale=pressed?0.9:1;
+    ctx.save();
+    ctx.translate(b.x,b.y);ctx.scale(scale,scale);ctx.translate(-b.x,-b.y);
+    ctx.globalAlpha=pressed?1:0.82;
+    ctx.fillStyle=pressed?`${b.color}44`:'rgba(10,15,35,0.9)';
+    roundRect(ctx,b.x-b.w/2,b.y-b.h/2,b.w,b.h,8);ctx.fill();
+    ctx.strokeStyle=b.color;ctx.lineWidth=pressed?3:2;
+    roundRect(ctx,b.x-b.w/2,b.y-b.h/2,b.w,b.h,8);ctx.stroke();
+    ctx.globalAlpha=1;
+    ctx.fillStyle=pressed?'#fff':b.color;
+    ctx.font=`bold ${Math.round(b.h*0.4)}px -apple-system,Arial`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(b.label,b.x,b.y);
+    ctx.restore();
+  }
+
+  // Face-off button — pulsing gold, shown when waiting for face-off
+  if(G.state==='faceoff'){
+    const pulse=0.65+0.35*Math.abs(Math.sin(Date.now()/400));
+    ctx.globalAlpha=pulse;
+    ctx.fillStyle='#fbbf24';
+    ctx.beginPath();ctx.arc(faceoff.x,faceoff.y,faceoff.r,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(faceoff.x,faceoff.y,faceoff.r,0,Math.PI*2);ctx.stroke();
+    ctx.globalAlpha=1;
+    ctx.fillStyle='#000';
+    ctx.font=`bold ${Math.round(faceoff.r*0.38)}px -apple-system,Arial`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('FACE-OFF',faceoff.x,faceoff.y);
+  }
 }
 
 function roundRect(ctx,x,y,w,h,r){
@@ -1503,9 +1584,13 @@ function render(){
   ctx2.clearRect(0,0,L.W,L.H);
   // Background
   ctx2.fillStyle='#080c18';ctx2.fillRect(0,0,L.W,L.H);
+  // Screen shake
+  const sk=G.screenShake;
+  if(sk.timer>0){ctx2.save();ctx2.translate(sk.x,sk.y);}
   drawRink(ctx2,L);
   drawPlayers(ctx2,L);
   if(!G.puck.carrier||(G.puck.carrier&&!G.puck.carrier.isGoalie))drawPuck(ctx2,L);
+  if(sk.timer>0){ctx2.restore();}
   drawHUD(ctx2,L);
   drawControls(ctx2,L);
 }
@@ -1750,11 +1835,10 @@ function updateControlled(){
 
 function moveControlled(dt){
   const p=G.controlled;if(!p)return;
-  if(G.slapCharging){p.vx*=0.7;p.vy*=0.7;return;}
   if(G.joyActive&&(Math.abs(G.joyDX)>0.08||Math.abs(G.joyDY)>0.08)){
     const spd=CFG.MAX_SPD*(p.spd/100*0.4+0.6);
-    p.vx+=(G.joyDX*spd-p.vx)*0.35;
-    p.vy+=(G.joyDY*spd-p.vy)*0.35;
+    p.vx+=(G.joyDX*spd-p.vx)*0.45;
+    p.vy+=(G.joyDY*spd-p.vy)*0.45;
   }else{p.vx*=CFG.FRICTION;p.vy*=CFG.FRICTION;}
 }
 
@@ -1769,10 +1853,26 @@ function doShoot(type){
   G.puck.vx=(dx/d)*spd+(Math.random()-0.5)*inac;
   G.puck.vy=(dy/d)*spd+(Math.random()-0.5)*inac;
   G.puck.carrier=null;p.hasPuck=false;
+  G.bufferedShotUntil=0;
+  // Screen shake on slap shot
+  if(type==='slap'){
+    const mag=4;
+    G.screenShake.x=(Math.random()-0.5)*mag;
+    G.screenShake.y=(Math.random()-0.5)*mag;
+    G.screenShake.timer=0.18;
+  }
 }
 
 function doPass(){
   const p=G.controlled;if(!p||!p.hasPuck)return;
+  // If joystick is active, pass in joystick direction
+  if(G.joyActive&&(Math.abs(G.joyDX)>0.15||Math.abs(G.joyDY)>0.15)){
+    const jd=Math.sqrt(G.joyDX*G.joyDX+G.joyDY*G.joyDY)||1;
+    G.puck.vx=(G.joyDX/jd)*CFG.PASS_SPD;
+    G.puck.vy=(G.joyDY/jd)*CFG.PASS_SPD;
+    G.puck.carrier=null;p.hasPuck=false;
+    return;
+  }
   const targets=G.players.filter(x=>x.team===p.team&&x!==p&&!x.isGoalie);
   if(!targets.length)return;
   const attackY=getAttackY(p.team);
@@ -1818,18 +1918,44 @@ function doPoke(){
 // ===================== TOUCH INPUT =====================
 function hitTestButtons(x,y){
   const L=G.layout;if(!L)return null;
-  for(const[name,b]of Object.entries(L.btns)){
-    if(x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h)return name;
+  // Face-off button (only active when waiting for face-off)
+  if(G.state==='faceoff'){
+    const fo=L.faceoff;
+    if(Math.hypot(x-fo.x,y-fo.y)<=fo.r+10)return'faceoff';
   }
+  // Rectangular hit test for SHOOT
+  {const b=L.btns.shoot;if(x>=b.x-b.w/2-8&&x<=b.x+b.w/2+8&&y>=b.y-b.h/2-8&&y<=b.y+b.h/2+8)return'shoot';}
+  // PASS or CHECK depending on possession — same position
+  {const b=L.btns.pass;const hp=G.controlled&&G.controlled.hasPuck;
+   if(x>=b.x-b.w/2-8&&x<=b.x+b.w/2+8&&y>=b.y-b.h/2-8&&y<=b.y+b.h/2+8)return hp?'pass':'check';}
   return null;
 }
 
 function handleButtonPress(name){
   if(name==='pass')doPass();
-  else if(name==='shoot')doShoot('wrist');
-  else if(name==='slap'){G.slapCharging=true;G.slapCharge=0;}
-  else if(name==='check')doCheck();
-  else if(name==='poke')doPoke();
+  else if(name==='check')doDefend();
+  else if(name==='faceoff'){G.stateTimer=0;G.state='playing';}
+  // 'shoot' is handled in onTouchEnd via tap/hold logic
+}
+
+function tryBufferedShot(){
+  if(G.bufferedShotUntil>performance.now()&&G.controlled&&G.controlled.hasPuck){
+    doShoot(G._bufferedShotType||'wrist');
+    G.bufferedShotUntil=0;
+  }
+}
+
+function doDefend(){
+  // Smart defensive action: poke if near carrier, body check if very close
+  const p=G.controlled;if(!p)return;
+  const carrier=G.players.find(x=>x.hasPuck&&x.team!==p.team);
+  if(carrier){
+    const d=dist(p.x,p.y,carrier.x,carrier.y);
+    if(d<=CFG.CHECK_R)doCheck();
+    else doPoke();
+  }else{
+    doCheck();
+  }
 }
 
 function onTouchStart(e){
@@ -1837,8 +1963,8 @@ function onTouchStart(e){
   for(const t of e.changedTouches){
     const x=t.clientX,y=t.clientY;
     const L=G.layout;if(!L)continue;
-    // Joystick zone: left 46% of screen, bottom control area
-    if(x<L.W*0.46&&y>L.H-L.ctrlH){
+    // Joystick zone: left 38% of screen, bottom control area
+    if(x<L.W*0.38&&y>L.H-L.ctrlH){
       G.joyActive=true;G.joyTid=t.identifier;
       G.joyCX=x;G.joyCY=y;G.joyDX=0;G.joyDY=0;
       G.activeTouches[t.identifier]='joy';
@@ -1847,8 +1973,16 @@ function onTouchStart(e){
       if(btn){
         G.btnState[btn]=true;
         G.activeTouches[t.identifier]='btn:'+btn;
-        handleButtonPress(btn);
-        if(btn==='slap')G.slapTid=t.identifier;
+        if(btn==='shoot'){
+          G.shootPressTime=performance.now();
+          G.shootCharging=true;G.shootCharge=0;
+          // If no puck, buffer the shot
+          if(!G.controlled||!G.controlled.hasPuck){
+            G.bufferedShotUntil=performance.now()+CFG.INPUT_BUFFER*1000;
+          }
+        }else{
+          handleButtonPress(btn);
+        }
       }
     }
   }
@@ -1876,10 +2010,16 @@ function onTouchEnd(e){
     else if(info&&info.startsWith('btn:')){
       const btn=info.split(':')[1];
       G.btnState[btn]=false;
-      if(btn==='slap'&&G.slapCharging){
-        // Fire slap shot if charged
-        if(G.slapCharge>=0.35)doShoot('slap');
-        G.slapCharging=false;G.slapCharge=0;
+      if(btn==='shoot'){
+        const held=(performance.now()-G.shootPressTime)/1000;
+        G.shootCharging=false;G.shootCharge=0;
+        if(G.controlled&&G.controlled.hasPuck){
+          doShoot(held>=CFG.SLAP_THRESHOLD?'slap':'wrist');
+        }else{
+          // Buffer the shot if near pickup time
+          G.bufferedShotUntil=performance.now()+CFG.INPUT_BUFFER*1000;
+          G._bufferedShotType=held>=CFG.SLAP_THRESHOLD?'slap':'wrist';
+        }
       }
     }
     delete G.activeTouches[t.identifier];
@@ -1907,11 +2047,26 @@ function update(dt){
   if(G.state==='playing'){
     G.clock-=dt*CFG.GAME_SPEED;
     if(G.clock<=0){G.clock=0;G.state='period_end';G.stateTimer=2.5;}
-    if(G.slapCharging){G.slapCharge+=dt;if(G.slapCharge>=0.5){doShoot('slap');G.slapCharging=false;G.slapCharge=0;}}
+    // Shoot charge tracking
+    if(G.shootCharging)G.shootCharge+=dt;
+    // Try buffered shot when puck gained
+    tryBufferedShot();
     updateControlled();
     moveControlled(dt);
     updateAllAI(dt);
     updatePhysics(dt);
+    // Puck trail
+    if(!G.puck.carrier){
+      const spd=Math.sqrt(G.puck.vx*G.puck.vx+G.puck.vy*G.puck.vy);
+      if(spd>1){G.puckTrail.push({x:G.puck.x,y:G.puck.y});if(G.puckTrail.length>8)G.puckTrail.shift();}
+    }else{G.puckTrail=[];}
+    // Screen shake decay
+    if(G.screenShake.timer>0){
+      G.screenShake.timer-=dt;
+      const mag=G.screenShake.timer>0?4*(G.screenShake.timer/0.18):0;
+      G.screenShake.x=(Math.random()-0.5)*mag;G.screenShake.y=(Math.random()-0.5)*mag;
+      if(G.screenShake.timer<=0){G.screenShake.x=0;G.screenShake.y=0;}
+    }
   }else if(G.state==='faceoff'){
     G.stateTimer-=dt;
     if(G.stateTimer<=0)G.state='playing';
