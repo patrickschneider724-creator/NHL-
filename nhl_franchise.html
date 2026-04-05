@@ -90,7 +90,7 @@ text-shadow:0 0 40px #ff0,0 0 80px #f90;text-align:center;line-height:1.2;}
 const RINK={W:85,H:200,GL_TOP:11,GL_BOT:189,GOAL_W:6,GOAL_D:4,BL_TOP:75,BL_BOT:125,CTR:100,CR_R:7,CR_D:5};
 const CFG={CAP:88000000,PERIOD_SECS:1200,GAME_SPEED:6.5,PERIODS:3,SEASON_GAMES:82,DRAFT_ROUNDS:7,
 P_R:2.5,PUCK_R:0.5,MAX_SPD:3.5,FRICTION:0.92,PUCK_FRIC:0.988,
-WRIST_SPD:14,SLAP_SPD:20,PASS_SPD:11,AI_SPD:1.5,GOALIE_SPD:1.6,
+WRIST_SPD:14,SLAP_SPD:20,PASS_SPD:9,AI_SPD:1.5,GOALIE_SPD:1.6,
 PICKUP_R:5.0,CHECK_R:5,POKE_R:5,SLAP_THRESHOLD:0.25,INPUT_BUFFER:0.12};
 
 // ===================== 32 NHL TEAMS =====================
@@ -1756,18 +1756,71 @@ function checkGoal(side){
 function getAttackY(team){return team==='home'?RINK.GL_TOP:RINK.GL_BOT;}
 function getDefendY(team){return team==='home'?RINK.GL_BOT:RINK.GL_TOP;}
 
-function getDefaultPos(role,team){
-  const isHome=team==='home';
-  const positions={
-    'C':{x:42.5,y:isHome?105:95},
-    'LW':{x:18,y:isHome?115:85},
-    'RW':{x:67,y:isHome?115:85},
-    'LD':{x:25,y:isHome?140:60},
-    'RD':{x:60,y:isHome?140:60},
-    'G':{x:42.5,y:isHome?185:15},
-  };
-  return positions[role]||{x:42.5,y:isHome?100:100};
+// Zone helpers — is puck in this team's offensive / defensive zone?
+function puckInOZ(team){
+  const py=G.puck.carrier?G.puck.carrier.y:G.puck.y;
+  return team==='home'?py<RINK.BL_TOP:py>RINK.BL_BOT;
 }
+function puckInDZ(team){
+  const py=G.puck.carrier?G.puck.carrier.y:G.puck.y;
+  return team==='home'?py>RINK.BL_BOT:py<RINK.BL_TOP;
+}
+
+// Where each role should be when team is attacking (OZ)
+function getOZPos(role,team,puckX){
+  const isHome=team==='home';
+  const oz=isHome?22:178; // slot depth
+  const bl=isHome?RINK.BL_TOP+4:RINK.BL_BOT-4; // blue line hold
+  switch(role){
+    case 'LW': return{x:clamp(puckX-24,5,32),y:isHome?oz+8:oz-8};
+    case 'RW': return{x:clamp(puckX+24,53,80),y:isHome?oz+8:oz-8};
+    case 'C':  return{x:clamp(puckX,30,55),y:isHome?oz+16:oz-16};
+    case 'LD': return{x:clamp(puckX-12,5,40),y:bl};
+    case 'RD': return{x:clamp(puckX+12,45,80),y:bl};
+    default:   return{x:42.5,y:isHome?oz:oz};
+  }
+}
+
+// Where each role should be in neutral zone
+function getNZPos(role,team){
+  const isHome=team==='home';
+  switch(role){
+    case 'LW': return{x:18,y:isHome?115:85};
+    case 'RW': return{x:67,y:isHome?115:85};
+    case 'C':  return{x:42.5,y:isHome?108:92};
+    case 'LD': return{x:22,y:isHome?138:62};
+    case 'RD': return{x:63,y:isHome?138:62};
+    default:   return{x:42.5,y:100};
+  }
+}
+
+// Where each role should be defending (DZ) — cover zones, not just chase puck
+function getDZPos(role,team,puckX,puckY){
+  const isHome=team==='home';
+  const gline=isHome?RINK.GL_BOT:RINK.GL_TOP;
+  const bl=isHome?RINK.BL_BOT:RINK.BL_TOP;
+  const atkDir=isHome?1:-1;
+  switch(role){
+    case 'LW':
+      // Left-wall pressure near puck, but don't go deeper than puck
+      return{x:clamp(puckX-16,5,38),y:isHome?clamp(puckY,bl-5,gline-15):clamp(puckY,gline+15,bl+5)};
+    case 'RW':
+      return{x:clamp(puckX+16,47,80),y:isHome?clamp(puckY,bl-5,gline-15):clamp(puckY,gline+15,bl+5)};
+    case 'C':
+      // Cover the slot — stay between puck and goal, don't chase corners
+      return{x:clamp(puckX,28,57),y:isHome?clamp(gline-35,gline-50,puckY-5):clamp(gline+35,puckY+5,gline+50)};
+    case 'LD':
+      // Left D: stay on left side between puck and goal, hold blue line when puck is out
+      if(isHome?puckY<bl:puckY>bl)return{x:clamp(puckX-10,5,42),y:bl+(isHome?-4:4)};
+      return{x:clamp(puckX-12,5,38),y:isHome?clamp(gline-20,gline-40,puckY-8):clamp(gline+20,puckY+8,gline+40)};
+    case 'RD':
+      if(isHome?puckY<bl:puckY>bl)return{x:clamp(puckX+10,43,80),y:bl+(isHome?-4:4)};
+      return{x:clamp(puckX+12,47,80),y:isHome?clamp(gline-20,gline-40,puckY-8):clamp(gline+20,puckY+8,gline+40)};
+    default: return getNZPos(role,team);
+  }
+}
+
+function getDefaultPos(role,team){return getNZPos(role,team);}
 
 function updateAllAI(dt){
   G.players.forEach(p=>{
@@ -1781,55 +1834,98 @@ function updateAllAI(dt){
 function updateSkaterAI(p,dt){
   const puck=G.puck;
   const puckCarrier=G.players.find(x=>x.hasPuck);
+  const isHome=p.team==='home';
   const attackY=getAttackY(p.team);
-  const defendY=getDefendY(p.team);
+  const puckX=puckCarrier?puckCarrier.x:puck.x;
+  const puckY=puckCarrier?puckCarrier.y:puck.y;
+  const isDefender=p.role==='LD'||p.role==='RD';
   let tx=p.x,ty=p.y;
 
   if(!puckCarrier){
-    // Loose puck - closest chases, others position
-    let closestD=999;
-    G.players.filter(x=>x.team===p.team&&!x.isGoalie&&!x.isPlayer).forEach(x=>{
-      const d=dist(x.x,x.y,puck.x,puck.y);if(d<closestD)closestD=d;
-    });
+    // Loose puck — only the closest player on each team chases; others drift to position
+    const teammates=G.players.filter(x=>x.team===p.team&&!x.isGoalie);
     const myD=dist(p.x,p.y,puck.x,puck.y);
-    if(myD<=closestD+3){tx=puck.x;ty=puck.y;}
-    else{const dp=getDefaultPos(p.role,p.team);tx=dp.x;ty=dp.y;}
+    const numCloser=teammates.filter(x=>x!==p&&dist(x.x,x.y,puck.x,puck.y)<myD).length;
+    // Defenders only chase if no forward is closer
+    const shouldChase=isDefender?(numCloser===0):(numCloser<=1);
+    if(shouldChase){tx=puck.x;ty=puck.y;}
+    else{
+      const pos=puckInDZ(p.team)?getDZPos(p.role,p.team,puck.x,puck.y):
+                puckInOZ(p.team)?getOZPos(p.role,p.team,puck.x):
+                getNZPos(p.role,p.team);
+      tx=pos.x;ty=pos.y;
+    }
   }else if(puckCarrier.team===p.team){
     if(puckCarrier===p){
-      // I have the puck - attack!
-      const goalX=42.5+(Math.random()-0.5)*12;
-      const goalDist=Math.abs(p.y-attackY);
-      if(goalDist<38&&p.aiShootCD<=0&&Math.random()<0.007){aiShoot(p);p.aiShootCD=2.5;}
-      tx=goalX;ty=attackY+(p.team==='home'?25:-25);
+      // I have the puck
+      const inOZ=puckInOZ(p.team);
+      const inNZ=!puckInOZ(p.team)&&!puckInDZ(p.team);
+      const inDZ=puckInDZ(p.team);
+
+      // AI passing: look for open teammate before charging
+      if(p.aiShootCD<=0&&Math.random()<(inNZ?0.018:inDZ?0.025:0.006)){
+        const passed=aiTryPass(p);
+        if(passed){p.aiShootCD=1.5;return;}
+      }
+
+      if(isDefender){
+        // D-men: carry to blue line, then look to shoot from point
+        const ptY=isHome?RINK.BL_TOP+5:RINK.BL_BOT-5;
+        const goalDist=Math.abs(p.y-attackY);
+        if(goalDist<60&&inOZ&&p.aiShootCD<=0&&Math.random()<0.006){aiShoot(p);p.aiShootCD=3;}
+        // In own zone, move puck up; at blue line, hold and look to pass
+        tx=p.x;ty=inDZ?(isHome?p.y-2:p.y+2):ptY;
+      }else{
+        // Forwards
+        const goalDist=Math.abs(p.y-attackY);
+        if(goalDist<40&&inOZ&&p.aiShootCD<=0&&Math.random()<0.009){aiShoot(p);p.aiShootCD=2.5;}
+        if(inOZ){
+          // In OZ: drive to slot
+          const slotX=clamp(p.x,22,63);
+          const slotY=attackY+(isHome?28:-28);
+          tx=slotX;ty=slotY;
+        }else{
+          // In NZ or DZ: carry puck up ice toward OZ, don't sprint to slot yet
+          const nzPos=getNZPos(p.role,p.team);
+          tx=nzPos.x;ty=nzPos.y+(isHome?-8:8); // slightly forward of NZ default
+        }
+      }
     }else{
-      // Support - move to open position
-      const side=p.role==='LW'?-1:p.role==='RW'?1:0;
-      const fwdOffset=p.team==='home'?-30:30;
-      tx=clamp(puckCarrier.x+side*20,5,80);
-      ty=clamp(puckCarrier.y+fwdOffset,-5,RINK.H+5);
+      // Teammate has puck — spread into position based on zone
+      const pos=puckInOZ(p.team)?getOZPos(p.role,p.team,puckX):
+                puckInDZ(p.team)?getNZPos(p.role,p.team):
+                getNZPos(p.role,p.team);
+      tx=pos.x;ty=pos.y;
     }
   }else{
-    // Opponents have puck - defend or pressure
+    // Enemy has puck — defend based on zone
     const d=dist(p.x,p.y,puckCarrier.x,puckCarrier.y);
+    // Pressure / check only when close
     if(d<CFG.POKE_R&&Math.random()<0.04)aiPokeCheck(p,puckCarrier);
     if(d<CFG.CHECK_R&&Math.random()<0.025)aiBodyCheck(p,puckCarrier);
-    if(d<30){tx=puckCarrier.x;ty=puckCarrier.y;}
-    else{
-      const dp=getDefaultPos(p.role,p.team);
-      const mixX=(puckCarrier.x+dp.x)/2;
-      const mixY=(puckCarrier.y+dp.y)/2;
-      tx=mixX+(dp.x-mixX)*0.5;ty=mixY+(dp.y-mixY)*0.5;
+
+    if(puckInDZ(p.team)){
+      // Puck in our zone — defend tight
+      const pos=getDZPos(p.role,p.team,puckX,puckY);
+      tx=pos.x;ty=pos.y;
+    }else if(puckInOZ(p.team)){
+      // Puck in enemy zone but they have it — backcheck hard
+      const nz=getNZPos(p.role,p.team);
+      tx=nz.x;ty=nz.y;
+    }else{
+      // Neutral zone — back pressure, stay between puck and own goal
+      const nz=getNZPos(p.role,p.team);
+      tx=nz.x;ty=nz.y;
     }
   }
 
-  // Move toward target
+  // Move toward target with smooth steering
   const tdx=tx-p.x,tdy=ty-p.y;
   const td=Math.sqrt(tdx*tdx+tdy*tdy);
-  const spd=CFG.AI_SPD;
   if(td>0.8){
-    const ns=Math.min(spd,td);
-    p.vx+=(tdx/td*ns-p.vx)*0.25;
-    p.vy+=(tdy/td*ns-p.vy)*0.25;
+    const ns=Math.min(CFG.AI_SPD,td);
+    p.vx+=(tdx/td*ns-p.vx)*0.28;
+    p.vy+=(tdy/td*ns-p.vy)*0.28;
   }else{p.vx*=0.7;p.vy*=0.7;}
 }
 
@@ -1871,6 +1967,26 @@ function updateGoalieAI(goalie,dt){
       }
     }
   }
+}
+
+function aiTryPass(p){
+  // Find a nearby open teammate and pass to them
+  const isHome=p.team==='home';
+  const attackY=getAttackY(p.team);
+  const targets=G.players.filter(x=>x.team===p.team&&x!==p&&!x.isGoalie);
+  let best=null,bestScore=-Infinity;
+  targets.forEach(t=>{
+    const d=dist(p.x,p.y,t.x,t.y);
+    if(d<4||d>55)return; // too close or too far
+    const fwd=isHome?(t.y<p.y):(t.y>p.y);
+    // Prefer: moderately close, slightly forward, not contested
+    const contested=G.players.some(e=>e.team!==p.team&&!e.isGoalie&&dist(e.x,e.y,t.x,t.y)<8);
+    const score=(fwd?30:5)-d*0.6+(contested?-40:0);
+    if(score>bestScore){bestScore=score;best=t;}
+  });
+  if(!best||bestScore<-20)return false;
+  passToTarget(p,best);
+  return true;
 }
 
 function aiShoot(p){
@@ -1952,28 +2068,58 @@ function doShoot(type){
 
 function doPass(){
   const p=G.controlled;if(!p||!p.hasPuck)return;
-  // If joystick is active, pass in joystick direction
+  // Joystick-directed pass: find nearest teammate in joystick direction
   if(G.joyActive&&(Math.abs(G.joyDX)>0.15||Math.abs(G.joyDY)>0.15)){
     const jd=Math.sqrt(G.joyDX*G.joyDX+G.joyDY*G.joyDY)||1;
-    G.puck.vx=(G.joyDX/jd)*CFG.PASS_SPD;
-    G.puck.vy=(G.joyDY/jd)*CFG.PASS_SPD;
-    G.puck.carrier=null;p.hasPuck=false;
+    const jnx=G.joyDX/jd,jny=G.joyDY/jd;
+    // Find teammate most aligned with joystick direction and closest
+    const targets=G.players.filter(x=>x.team===p.team&&x!==p&&!x.isGoalie);
+    let best=null,bestScore=-Infinity;
+    targets.forEach(t=>{
+      const dx=t.x-p.x,dy=t.y-p.y;
+      const d=Math.sqrt(dx*dx+dy*dy)||1;
+      const align=(dx/d)*jnx+(dy/d)*jny; // dot product: 1=perfect alignment
+      if(align>0.3){// only pass to players roughly in stick direction
+        const score=align*60-d*0.5;
+        if(score>bestScore){bestScore=score;best=t;}
+      }
+    });
+    if(best){
+      passToTarget(p,best);
+    }else{
+      // No teammate in that direction — fire puck in joystick direction
+      G.puck.vx=jnx*CFG.PASS_SPD;G.puck.vy=jny*CFG.PASS_SPD;
+      G.puck.carrier=null;p.hasPuck=false;
+    }
     return;
   }
+  // Auto-pass: pick best open teammate — prefer nearby + slightly forward
   const targets=G.players.filter(x=>x.team===p.team&&x!==p&&!x.isGoalie);
   if(!targets.length)return;
-  const attackY=getAttackY(p.team);
+  const isHome=p.team==='home';
   let best=null,bestScore=-Infinity;
   targets.forEach(t=>{
     const d=dist(p.x,p.y,t.x,t.y);
-    const fwd=p.team==='home'?(t.y<p.y):(t.y>p.y);
-    const score=(fwd?50:0)+(100-Math.abs(t.y-attackY))*0.3-d*0.3;
+    if(d<3)return; // skip if right on top of passer
+    const fwd=isHome?(t.y<p.y):(t.y>p.y);
+    // Prefer: nearby > slightly forward > open lanes. Proximity weighted more than pure forward
+    const score=(fwd?25:0)-d*0.8+(50-Math.abs(t.x-42.5))*0.2;
     if(score>bestScore){bestScore=score;best=t;}
   });
   if(!best)return;
-  const dx=best.x-p.x,dy=best.y-p.y;
+  passToTarget(p,best);
+}
+
+function passToTarget(p,target){
+  // Lead pass: aim slightly ahead of target's movement
+  const leadX=target.x+target.vx*4;
+  const leadY=target.y+target.vy*4;
+  const dx=leadX-p.x,dy=leadY-p.y;
   const d=Math.sqrt(dx*dx+dy*dy)||1;
-  G.puck.vx=(dx/d)*CFG.PASS_SPD;G.puck.vy=(dy/d)*CFG.PASS_SPD;
+  // Pass is more accurate than a shot — very low inaccuracy
+  const inac=(100-p.pas)/100*0.6;
+  G.puck.vx=(dx/d)*CFG.PASS_SPD+(Math.random()-0.5)*inac;
+  G.puck.vy=(dy/d)*CFG.PASS_SPD+(Math.random()-0.5)*inac;
   G.puck.carrier=null;p.hasPuck=false;
 }
 
@@ -2157,6 +2303,8 @@ function update(dt){
   }else if(G.state==='faceoff'){
     G.stateTimer-=dt;
     if(G.stateTimer<=0)G.state='playing';
+    // Pre-position players during faceoff countdown
+    updateAllAI(dt);
   }else if(G.state==='goal'){
     G.stateTimer-=dt;
     if(G.stateTimer<=0)faceOff(42.5,100);
