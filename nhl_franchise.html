@@ -89,8 +89,8 @@ text-shadow:0 0 40px #ff0,0 0 80px #f90;text-align:center;line-height:1.2;}
 // ===================== CONSTANTS =====================
 const RINK={W:85,H:200,GL_TOP:11,GL_BOT:189,GOAL_W:6,GOAL_D:4,BL_TOP:75,BL_BOT:125,CTR:100,CR_R:7,CR_D:5};
 const CFG={CAP:88000000,PERIOD_SECS:1200,GAME_SPEED:6.5,PERIODS:3,SEASON_GAMES:82,DRAFT_ROUNDS:7,
-P_R:2.5,PUCK_R:0.5,PUCK_FRIC:0.988,
-WRIST_SPD:14,SLAP_SPD:20,PASS_SPD:9,GOALIE_SPD:1.6,
+P_R:2.5,PUCK_R:0.5,PUCK_FRIC:0.974,
+WRIST_SPD:6,SLAP_SPD:10,PASS_SPD:5.5,GOALIE_SPD:1.6,
 PICKUP_R:5.0,CHECK_R:5,POKE_R:5,SLAP_THRESHOLD:0.25,INPUT_BUFFER:0.12};
 
 // ===================== MOVEMENT PHYSICS =====================
@@ -1358,11 +1358,15 @@ function drawRink(ctx,L){
   // Center dot
   ctx.fillStyle='#c00';ctx.beginPath();ctx.arc(gx(42.5),gy(100),gs(1.2),0,Math.PI*2);ctx.fill();
 
-  // Face-off dots
-  const foDots=[
-    [20,72],[65,72],[20,128],[65,128]
-  ];
-  foDots.forEach(([fx,fy])=>{
+  // Face-off dots — neutral zone (just inside blue lines) + end zones
+  const foNeutral=[[20,80],[65,80],[20,120],[65,120]];
+  foNeutral.forEach(([fx,fy])=>{
+    ctx.strokeStyle='#c00';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(gx(fx),gy(fy),gs(6),0,Math.PI*2);ctx.stroke();
+    ctx.fillStyle='#c00';ctx.beginPath();ctx.arc(gx(fx),gy(fy),gs(1),0,Math.PI*2);ctx.fill();
+  });
+  const foEnd=[[20,31],[65,31],[20,169],[65,169]];
+  foEnd.forEach(([fx,fy])=>{
     ctx.strokeStyle='#c00';ctx.lineWidth=1.5;
     ctx.beginPath();ctx.arc(gx(fx),gy(fy),gs(6),0,Math.PI*2);ctx.stroke();
     ctx.fillStyle='#c00';ctx.beginPath();ctx.arc(gx(fx),gy(fy),gs(1),0,Math.PI*2);ctx.fill();
