@@ -87,7 +87,7 @@ text-shadow:0 0 40px #ff0,0 0 80px #f90;text-align:center;line-height:1.2;}
 <script>
 (function(){'use strict';
 // ===================== CONSTANTS =====================
-const RINK={W:85,H:200,GL_TOP:11,GL_BOT:189,GOAL_W:6,GOAL_D:4,BL_TOP:75,BL_BOT:125,CTR:100,CR_R:7,CR_D:5};
+const RINK={W:85,H:200,GL_TOP:11,GL_BOT:189,GOAL_W:9,GOAL_D:6,BL_TOP:75,BL_BOT:125,CTR:100,CR_R:7,CR_D:5};
 const CFG={CAP:88000000,PERIOD_SECS:1200,GAME_SPEED:6.5,PERIODS:3,SEASON_GAMES:82,DRAFT_ROUNDS:7,
 P_R:2.5,PUCK_R:0.5,PUCK_FRIC:0.974,
 WRIST_SPD:6,SLAP_SPD:10,PASS_SPD:5.5,GOALIE_SPD:1.6,
@@ -1359,11 +1359,10 @@ function drawRink(ctx,L){
   ctx.fillStyle='#c00';ctx.beginPath();ctx.arc(gx(42.5),gy(100),gs(1.2),0,Math.PI*2);ctx.fill();
 
   // Face-off dots — neutral zone (just inside blue lines) + end zones
+  // Neutral zone: dots only (no circle), per standard NHL layout
   const foNeutral=[[20,80],[65,80],[20,120],[65,120]];
   foNeutral.forEach(([fx,fy])=>{
-    ctx.strokeStyle='#c00';ctx.lineWidth=1.5;
-    ctx.beginPath();ctx.arc(gx(fx),gy(fy),gs(6),0,Math.PI*2);ctx.stroke();
-    ctx.fillStyle='#c00';ctx.beginPath();ctx.arc(gx(fx),gy(fy),gs(1),0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#c00';ctx.beginPath();ctx.arc(gx(fx),gy(fy),gs(1.5),0,Math.PI*2);ctx.fill();
   });
   const foEnd=[[20,31],[65,31],[20,169],[65,169]];
   foEnd.forEach(([fx,fy])=>{
@@ -2004,25 +2003,34 @@ function getDZCoveragePos(role,team,carrierX,carrierY){
   const bl=isHome?RINK.BL_BOT-4:RINK.BL_TOP+4;
   const slotY=defGL+(isHome?-25:25);
   if(role==='puck_pressure'){
-    // Approach carrier at an angle — intercept their movement path
+    // Chase carrier — small lead based on their velocity
     const spd=Math.sqrt((G.hs_state.puckCarrier?.vx||0)**2+(G.hs_state.puckCarrier?.vy||0)**2);
-    const lead=spd>0.3?5:0;
+    const lead=spd>0.3?3:0;
     return{
       x:clamp(carrierX+(G.hs_state.puckCarrier?.vx||0)*lead,3,RINK.W-3),
       y:clamp(carrierY+(G.hs_state.puckCarrier?.vy||0)*lead,3,RINK.H-3)
     };
   }
   if(role==='contain'){
-    // Position between carrier and goal, maintain gap
+    // Step into shooting lane between carrier and goal center
     const dx=42.5-carrierX,dy=defGL-carrierY;
     const d=Math.sqrt(dx*dx+dy*dy)||1;
-    return{x:clamp(carrierX+dx/d*12,6,79),y:clamp(carrierY+dy/d*12,6,RINK.H-6)};
+    return{x:clamp(carrierX+dx/d*9,6,79),y:clamp(carrierY+dy/d*9,6,RINK.H-6)};
   }
   if(role==='slot_cover'){
-    // Protect center-slot, float between puck and goal mouth
-    return{x:clamp(carrierX*0.4+42.5*0.6,28,57),y:slotY};
+    // Mark nearest dangerous opponent near the slot; otherwise hold slot
+    const dangerOpps=G.players.filter(opp=>opp.team!==team&&!opp.isGoalie&&opp!==carrier&&
+      Math.abs(opp.y-defGL)<38);
+    dangerOpps.sort((a,b)=>dist(a.x,a.y,42.5,slotY)-dist(b.x,b.y,42.5,slotY));
+    if(dangerOpps[0]){return{x:clamp(dangerOpps[0].x,8,77),y:clamp(dangerOpps[0].y,8,RINK.H-8)};}
+    return{x:42.5,y:slotY};
   }
   if(role==='net_front_cover'){
+    // Mark the nearest opponent threatening the net crease
+    const netOpps=G.players.filter(opp=>opp.team!==team&&!opp.isGoalie&&
+      Math.abs(opp.y-defGL)<22);
+    netOpps.sort((a,b)=>dist(a.x,a.y,42.5,defGL)-dist(b.x,b.y,42.5,defGL));
+    if(netOpps[0]){return{x:clamp(netOpps[0].x,8,77),y:clamp(netOpps[0].y,8,RINK.H-8)};}
     return{x:42.5+(carrierX>42.5?-8:8),y:defGL+(isHome?-14:14)};
   }
   if(role==='weak_side'){
@@ -2347,13 +2355,16 @@ function updateGoalieAI(goalie,dt){
   if(!puck.carrier&&puckSpd>3&&puckHeadingAtGoal){
     const d=dist(goalie.x,goalie.y,puck.x,puck.y);
     if(d<16){
-      // Base save rate scaled by goalie rating (70-rated ~85%, 90-rated ~94%)
-      const baseSave=0.72+(goalie.gol||80)/100*0.22;
-      // Speed penalty: very fast shots are harder to stop (max -12%)
-      const spdPenalty=Math.min(0.12,(puckSpd-8)/60);
-      // Position penalty: goalie off-centre gives up more (max -15%)
-      const posPenalty=Math.min(0.15,Math.abs(goalie.x-puck.x)/30);
-      const saveProb=Math.max(0.3,baseSave-spdPenalty-posPenalty);
+      // Base save rate — tuned for fun gameplay (~68-76% by rating)
+      const baseSave=0.52+(goalie.gol||80)/100*0.24;
+      // Speed penalty: calibrated to new puck speed range (max -14%)
+      const spdPenalty=Math.min(0.14,(puckSpd-2)/28);
+      // Position penalty: goalie off-center gives up more (max -20%)
+      const posPenalty=Math.min(0.20,Math.abs(goalie.x-puck.x)/25);
+      // Danger zone: shots from close range / slot are harder to save (max -12%)
+      const dangerDist=Math.sqrt((puck.x-42.5)**2+(puck.y-defY)**2);
+      const dangerBonus=Math.min(0.12,Math.max(0,(30-dangerDist)/30)*0.12);
+      const saveProb=Math.max(0.15,baseSave-spdPenalty-posPenalty-dangerBonus);
       if(Math.random()<saveProb){
         // Save! Deflect puck to the side
         puck.vx=(Math.random()-0.5)*6;
