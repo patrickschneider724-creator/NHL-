@@ -87,7 +87,7 @@ text-shadow:0 0 40px #ff0,0 0 80px #f90;text-align:center;line-height:1.2;}
 <script>
 (function(){'use strict';
 // ===================== CONSTANTS =====================
-const RINK={W:85,H:200,GL_TOP:11,GL_BOT:189,GOAL_W:9,GOAL_D:6,BL_TOP:75,BL_BOT:125,CTR:100,CR_R:7,CR_D:5};
+const RINK={W:85,H:200,GL_TOP:11,GL_BOT:189,GOAL_W:9,GOAL_D:6,BL_TOP:75,BL_BOT:125,CTR:100,CR_R:9,CR_D:7};
 const CFG={CAP:88000000,PERIOD_SECS:1200,GAME_SPEED:6.5,PERIODS:3,SEASON_GAMES:82,DRAFT_ROUNDS:7,
 P_R:2.5,PUCK_R:0.5,PUCK_FRIC:0.974,
 WRIST_SPD:6,SLAP_SPD:10,PASS_SPD:5.5,GOALIE_SPD:1.6,
@@ -1337,78 +1337,83 @@ function drawRink(ctx,L){
   ctx.lineTo(rx+cr,ry+rh);ctx.arcTo(rx,ry+rh,rx,ry+rh-cr,cr);
   ctx.lineTo(rx,ry+cr);ctx.arcTo(rx,ry,rx+cr,ry,cr);
   ctx.closePath();
-  ctx.fillStyle='#eef6fb';ctx.fill();
-  ctx.strokeStyle='#b0c8d8';ctx.lineWidth=2;ctx.stroke();
+  ctx.fillStyle='#f4f9fc';ctx.fill();
+  ctx.strokeStyle='#c87a4a';ctx.lineWidth=3;ctx.stroke(); // warm orange boards
   ctx.clip();
 
-  // Goalie creases
+  // Goalie creases — large, prominent
   const glx=gx(RINK.W/2),gcr=gs(RINK.CR_R),gcd=gs(RINK.CR_D);
-  // Top crease (away goal)
-  ctx.fillStyle='rgba(173,216,240,0.35)';
+  ctx.fillStyle='rgba(135,200,235,0.48)';
   ctx.beginPath();ctx.ellipse(glx,gy(RINK.GL_TOP),gcr,gcd,0,0,Math.PI,false);ctx.fill();
-  ctx.strokeStyle='#c00';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(glx,gy(RINK.GL_TOP),gcr,gcd,0,0,Math.PI,false);ctx.stroke();
-  // Bottom crease (home goal)
-  ctx.fillStyle='rgba(173,216,240,0.35)';
+  ctx.strokeStyle='#c8372a';ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.ellipse(glx,gy(RINK.GL_TOP),gcr,gcd,0,0,Math.PI,false);ctx.stroke();
+  ctx.fillStyle='rgba(135,200,235,0.48)';
   ctx.beginPath();ctx.ellipse(glx,gy(RINK.GL_BOT),gcr,gcd,0,Math.PI,2*Math.PI,false);ctx.fill();
-  ctx.strokeStyle='#c00';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(glx,gy(RINK.GL_BOT),gcr,gcd,0,Math.PI,2*Math.PI,false);ctx.stroke();
+  ctx.strokeStyle='#c8372a';ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.ellipse(glx,gy(RINK.GL_BOT),gcr,gcd,0,Math.PI,2*Math.PI,false);ctx.stroke();
 
-  // Center circle
-  ctx.strokeStyle='#c00';ctx.lineWidth=2;
+  // Center circle + dot
+  ctx.strokeStyle='#c8372a';ctx.lineWidth=gs(2.5);
   ctx.beginPath();ctx.arc(gx(42.5),gy(100),gs(15),0,Math.PI*2);ctx.stroke();
-  // Center dot
-  ctx.fillStyle='#c00';ctx.beginPath();ctx.arc(gx(42.5),gy(100),gs(1.2),0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#c8372a';ctx.beginPath();ctx.arc(gx(42.5),gy(100),gs(1.5),0,Math.PI*2);ctx.fill();
 
-  // Face-off dots — neutral zone (just inside blue lines) + end zones
-  // Neutral zone: dots only (no circle), per standard NHL layout
-  const foNeutral=[[20,80],[65,80],[20,120],[65,120]];
-  foNeutral.forEach(([fx,fy])=>{
-    ctx.fillStyle='#c00';ctx.beginPath();ctx.arc(gx(fx),gy(fy),gs(1.5),0,Math.PI*2);ctx.fill();
+  // Neutral zone: dots only (standard NHL — no circle outline)
+  [[20,80],[65,80],[20,120],[65,120]].forEach(([fx,fy])=>{
+    ctx.fillStyle='#c8372a';ctx.beginPath();ctx.arc(gx(fx),gy(fy),gs(1.8),0,Math.PI*2);ctx.fill();
   });
-  const foEnd=[[20,31],[65,31],[20,169],[65,169]];
-  foEnd.forEach(([fx,fy])=>{
-    ctx.strokeStyle='#c00';ctx.lineWidth=1.5;
-    ctx.beginPath();ctx.arc(gx(fx),gy(fy),gs(6),0,Math.PI*2);ctx.stroke();
-    ctx.fillStyle='#c00';ctx.beginPath();ctx.arc(gx(fx),gy(fy),gs(1),0,Math.PI*2);ctx.fill();
+  // End-zone faceoff circles with hash marks
+  [[20,31],[65,31],[20,169],[65,169]].forEach(([fx,fy])=>{
+    const cx=gx(fx),cy=gy(fy),cr2=gs(6),hL=gs(3),hG=gs(1.8);
+    ctx.strokeStyle='#c8372a';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(cx,cy,cr2,0,Math.PI*2);ctx.stroke();
+    [-1,1].forEach(s=>{
+      ctx.beginPath();ctx.moveTo(cx+s*cr2,cy-hG);ctx.lineTo(cx+s*(cr2+hL),cy-hG);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx+s*cr2,cy+hG);ctx.lineTo(cx+s*(cr2+hL),cy+hG);ctx.stroke();
+    });
+    ctx.fillStyle='#c8372a';ctx.beginPath();ctx.arc(cx,cy,gs(1.2),0,Math.PI*2);ctx.fill();
   });
 
   // Blue lines
-  ctx.strokeStyle='#1e3fa4';ctx.lineWidth=gs(2);
+  ctx.strokeStyle='#1e3fa4';ctx.lineWidth=gs(3);
   ctx.beginPath();ctx.moveTo(rx,gy(RINK.BL_TOP));ctx.lineTo(rx+rw,gy(RINK.BL_TOP));ctx.stroke();
   ctx.beginPath();ctx.moveTo(rx,gy(RINK.BL_BOT));ctx.lineTo(rx+rw,gy(RINK.BL_BOT));ctx.stroke();
 
-  // Center red line
-  ctx.strokeStyle='#c00';ctx.lineWidth=gs(1.5);
+  // Center red line (dashed)
+  ctx.strokeStyle='#c8372a';ctx.lineWidth=gs(1.8);
   ctx.setLineDash([gs(3),gs(2)]);
   ctx.beginPath();ctx.moveTo(rx,gy(RINK.CTR));ctx.lineTo(rx+rw,gy(RINK.CTR));ctx.stroke();
   ctx.setLineDash([]);
 
   // Goal lines
-  ctx.strokeStyle='#c00';ctx.lineWidth=gs(1.5);
+  ctx.strokeStyle='#c8372a';ctx.lineWidth=gs(1.5);
   ctx.beginPath();ctx.moveTo(rx,gy(RINK.GL_TOP));ctx.lineTo(rx+rw,gy(RINK.GL_TOP));ctx.stroke();
   ctx.beginPath();ctx.moveTo(rx,gy(RINK.GL_BOT));ctx.lineTo(rx+rw,gy(RINK.GL_BOT));ctx.stroke();
 
-  // Goals (nets) — red posts, light netting fill
+  // Goals — trapezoid shape, thick red frame
   const goalLX=gx((RINK.W-RINK.GOAL_W)/2),goalRX=gx((RINK.W+RINK.GOAL_W)/2);
-  const gnetD=gs(RINK.GOAL_D);
-  // Net fill
-  ctx.fillStyle='rgba(220,230,235,0.7)';
-  ctx.fillRect(goalLX,gy(RINK.GL_TOP)-gnetD,goalRX-goalLX,gnetD);
-  ctx.fillRect(goalLX,gy(RINK.GL_BOT),goalRX-goalLX,gnetD);
-  // Red post frame
-  ctx.strokeStyle='#cc2200';ctx.lineWidth=Math.max(2,gs(0.9));
-  ctx.strokeRect(goalLX,gy(RINK.GL_TOP)-gnetD,goalRX-goalLX,gnetD);
-  ctx.strokeRect(goalLX,gy(RINK.GL_BOT),goalRX-goalLX,gnetD);
-  // Net crosshatch lines
-  ctx.strokeStyle='rgba(150,160,165,0.5)';ctx.lineWidth=0.5;
-  const nw=goalRX-goalLX,cols=4;
-  for(let i=1;i<cols;i++){
-    const nx=goalLX+nw*i/cols;
-    ctx.beginPath();ctx.moveTo(nx,gy(RINK.GL_TOP)-gnetD);ctx.lineTo(nx,gy(RINK.GL_TOP));ctx.stroke();
-    ctx.beginPath();ctx.moveTo(nx,gy(RINK.GL_BOT));ctx.lineTo(nx,gy(RINK.GL_BOT)+gnetD);ctx.stroke();
+  const gnetD=gs(RINK.GOAL_D),taper=gs(1.8);
+  const frontW=goalRX-goalLX,backW=frontW-2*taper;
+  ctx.fillStyle='rgba(200,218,230,0.88)';
+  ctx.beginPath();
+  ctx.moveTo(goalLX,gy(RINK.GL_TOP));ctx.lineTo(goalRX,gy(RINK.GL_TOP));
+  ctx.lineTo(goalRX-taper,gy(RINK.GL_TOP)-gnetD);ctx.lineTo(goalLX+taper,gy(RINK.GL_TOP)-gnetD);
+  ctx.closePath();ctx.fill();
+  ctx.strokeStyle='#cc2200';ctx.lineWidth=Math.max(3,gs(1.4));ctx.lineJoin='round';ctx.stroke();
+  ctx.fillStyle='rgba(200,218,230,0.88)';
+  ctx.beginPath();
+  ctx.moveTo(goalLX,gy(RINK.GL_BOT));ctx.lineTo(goalRX,gy(RINK.GL_BOT));
+  ctx.lineTo(goalRX-taper,gy(RINK.GL_BOT)+gnetD);ctx.lineTo(goalLX+taper,gy(RINK.GL_BOT)+gnetD);
+  ctx.closePath();ctx.fill();
+  ctx.strokeStyle='#cc2200';ctx.lineWidth=Math.max(3,gs(1.4));ctx.lineJoin='round';ctx.stroke();
+  // Net crosshatch (converging toward back)
+  ctx.strokeStyle='rgba(120,140,155,0.45)';ctx.lineWidth=0.5;
+  for(let i=1;i<4;i++){
+    const fx=goalLX+frontW*i/4,bx=(goalLX+taper)+backW*i/4;
+    ctx.beginPath();ctx.moveTo(fx,gy(RINK.GL_TOP));ctx.lineTo(bx,gy(RINK.GL_TOP)-gnetD);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(fx,gy(RINK.GL_BOT));ctx.lineTo(bx,gy(RINK.GL_BOT)+gnetD);ctx.stroke();
   }
-  // Horizontal net line (mid-depth)
-  ctx.beginPath();ctx.moveTo(goalLX,gy(RINK.GL_TOP)-gnetD*0.5);ctx.lineTo(goalRX,gy(RINK.GL_TOP)-gnetD*0.5);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(goalLX,gy(RINK.GL_BOT)+gnetD*0.5);ctx.lineTo(goalRX,gy(RINK.GL_BOT)+gnetD*0.5);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(goalLX+taper*0.5,gy(RINK.GL_TOP)-gnetD*0.5);ctx.lineTo(goalRX-taper*0.5,gy(RINK.GL_TOP)-gnetD*0.5);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(goalLX+taper*0.5,gy(RINK.GL_BOT)+gnetD*0.5);ctx.lineTo(goalRX-taper*0.5,gy(RINK.GL_BOT)+gnetD*0.5);ctx.stroke();
 
   ctx.restore();
 }
@@ -1491,15 +1496,37 @@ function drawPlayerSprite(ctx,p,px,py,pr,isControlled){
 
   ctx.restore();
 
-  // Controlled player — glowing cyan ring (like NHL 26)
+  // Controlled player — cyan ring + star rating badge
   if(isControlled){
     const ringR=pr+gs(1.2);
-    // Outer glow
     ctx.strokeStyle='rgba(0,255,200,0.25)';ctx.lineWidth=gs(1.5)+4;
     ctx.beginPath();ctx.arc(px,py,ringR,0,Math.PI*2);ctx.stroke();
-    // Inner solid ring
     ctx.strokeStyle='#00e8c0';ctx.lineWidth=2;
     ctx.beginPath();ctx.arc(px,py,ringR,0,Math.PI*2);ctx.stroke();
+    // Star badge above player
+    const badgeSz=Math.max(10,gs(3.2));
+    const badgeX=px-badgeSz*2.4,badgeY=py-pr-badgeSz*1.6;
+    const teamColor=p.team==='home'?'#cc2200':'#1e3fa4';
+    ctx.save();ctx.translate(badgeX,badgeY);
+    // 5-point star
+    ctx.beginPath();
+    for(let i=0;i<5;i++){
+      const a=-Math.PI/2+i*(Math.PI*2/5),ia=a+Math.PI/5;
+      i===0?ctx.moveTo(Math.cos(a)*badgeSz,Math.sin(a)*badgeSz):ctx.lineTo(Math.cos(a)*badgeSz,Math.sin(a)*badgeSz);
+      ctx.lineTo(Math.cos(ia)*badgeSz*0.42,Math.sin(ia)*badgeSz*0.42);
+    }
+    ctx.closePath();
+    ctx.fillStyle=teamColor;ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.9)';ctx.lineWidth=1.5;ctx.stroke();
+    // Rating + position text
+    const ovr=Math.round(((p.spd||75)+(p.sht||75)+(p.pas||75)+(p.def||75))/4);
+    ctx.fillStyle='#fff';
+    ctx.font=`bold ${Math.max(7,Math.round(badgeSz*0.62))}px Arial`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(ovr,0,-badgeSz*0.12);
+    ctx.font=`${Math.max(5,Math.round(badgeSz*0.44))}px Arial`;
+    ctx.fillText(p.role||'',0,badgeSz*0.42);
+    ctx.restore();
   }
 
   // Player last name label below sprite
@@ -1544,20 +1571,27 @@ function drawPlayers(ctx,L){
 
 function drawPuck(ctx,L){
   const p=G.puck;
-  // Draw trail
+  // Yellow/gold trail
   const trail=G.puckTrail;
   for(let i=0;i<trail.length;i++){
-    const alpha=(i/trail.length)*0.35;
+    const alpha=(i/trail.length)*0.55;
     ctx.globalAlpha=alpha;
-    ctx.fillStyle='#aaa';
-    ctx.beginPath();ctx.arc(gx(trail[i].x),gy(trail[i].y),Math.max(2,gs(0.35)),0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#f0c800';
+    ctx.beginPath();ctx.arc(gx(trail[i].x),gy(trail[i].y),Math.max(2,gs(0.4)),0,Math.PI*2);ctx.fill();
   }
   ctx.globalAlpha=1;
   const px=gx(p.x),py=gy(p.y);
-  const pr=gs(RINK.PUCK_R||0.5);
-  ctx.fillStyle='#111';
-  ctx.beginPath();ctx.arc(px,py,Math.max(4,pr),0,Math.PI*2);ctx.fill();
-  ctx.strokeStyle='#444';ctx.lineWidth=1;ctx.stroke();
+  const pr=Math.max(4,gs(RINK.PUCK_R||0.5));
+  // Outer glow
+  ctx.fillStyle='rgba(240,180,0,0.3)';
+  ctx.beginPath();ctx.arc(px,py,pr*1.8,0,Math.PI*2);ctx.fill();
+  // Puck body — yellow/gold
+  ctx.fillStyle='#e8b800';
+  ctx.beginPath();ctx.arc(px,py,pr,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle='#b08000';ctx.lineWidth=1.5;ctx.stroke();
+  // Highlight
+  ctx.fillStyle='rgba(255,240,100,0.6)';
+  ctx.beginPath();ctx.arc(px-pr*0.25,py-pr*0.25,pr*0.45,0,Math.PI*2);ctx.fill();
 }
 
 function drawHUD(ctx,L){
